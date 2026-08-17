@@ -6,11 +6,6 @@
 
 <img src = "/type.gif" width = "200">
 
-## 🚀 데모 (Live Demo)
-
-별도의 설치 없이 브라우저에서 바로 시작하세요.
-👉 [https://sumedit.vercel.app](https://sumedit.vercel.app)
-
 ---
 
 ## ✨ 주요 기능 (Key Features)
