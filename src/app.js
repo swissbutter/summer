@@ -1,1 +1,7152 @@
-a
+        const { useState, useCallback, useRef, useMemo, useEffect, memo } = React;
+        const { motion, AnimatePresence, Reorder } = window.Motion;
+
+        const CARD_W = 250;
+        const CARD_H = 200;
+        const FONT_DISPLAY_NAMES = {
+            maruburi: "마루부리",
+            Ridibatang: "리디바탕",
+            Galmuri14: "갈무리14",
+            dunggeunmo: "둥근모꼴",
+            joseon100: "조선100년체",
+            pretendard: "프리텐다드",
+        };
+        const BOOK_COLORS = [
+            '#1c1917', '#44403c', '#78716c', '#9f1239', '#be4d67', '#c2724c',
+            '#a3703c', '#8b7355', '#5c6d4a', '#4a766e', '#3d6a73', '#456b8a',
+            '#4a5d7a', '#5b5d8a', '#6b5b7a', '#7a5b6d', '#8c6478', '#6d5c5c'
+        ];
+        const NAME_DB = window.NAME_DB;
+        const NAME_ROLES = window.NAME_ROLES;
+        const generateUUID = () => {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        };
+
+        const sanitizeUrl = (url) => {
+            if (!url || typeof url !== 'string') return '';
+            const trimmed = url.trim();
+            if (trimmed.includes("'") || trimmed.includes('"') || trimmed.includes('\\') || trimmed.includes(';')) return '';
+            try {
+                const parsed = new URL(trimmed, window.location.href);
+                if (['http:', 'https:', 'data:'].includes(parsed.protocol)) {
+                    return parsed.href;
+                }
+            } catch (e) {}
+            return '';
+        };
+
+        const validateAndSanitizeImportData = (data) => {
+            if (!data) return null;
+            let booksArray = [];
+            if (Array.isArray(data)) {
+                booksArray = data;
+            } else if (typeof data === 'object' && data.id && data.title) {
+                booksArray = [data];
+            } else {
+                return null;
+            }
+
+            return booksArray.map(book => ({
+                id: String(book.id || generateUUID()),
+                title: String(book.title || '제목 없음'),
+                author: String(book.author || ''),
+                color: String(book.color || '#1c1917'),
+                coverImage: sanitizeUrl(book.coverImage),
+                projects: Array.isArray(book.projects) ? book.projects.map(p => ({
+                    id: String(p.id || generateUUID()),
+                    name: String(p.name || '새 문서'),
+                    type: String(p.type || 'editor'),
+                    content: String(p.content || ''),
+                    nodes: Array.isArray(p.nodes) ? p.nodes : [],
+                    edges: Array.isArray(p.edges) ? p.edges : []
+                })) : [],
+                activeProjectId: book.activeProjectId ? String(book.activeProjectId) : null
+            }));
+        };
+
+        // 불러오기(추가하기) 시 기존 책과 id가 겹치는 것을 방지하기 위해
+        // 책/프로젝트 id를 전부 새로 발급해준다. (id가 겹치면 React key 충돌로
+        // 새로 불러온 책이 기존 책과 동일하게 렌더링되는 문제가 발생함)
+        const remapBookIdsForImport = (book) => {
+            const idMap = {};
+            const newProjects = (book.projects || []).map(project => {
+                const newProjectId = generateUUID();
+                idMap[project.id] = newProjectId;
+                return { ...project, id: newProjectId };
+            });
+            return {
+                ...book,
+                id: generateUUID(),
+                projects: newProjects,
+                activeProjectId: idMap[book.activeProjectId] || (newProjects[0] && newProjects[0].id)
+            };
+        };
+        const IconPlus = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M5 12h14" /><path d="M12 5v14" /></svg>);
+        const IconTrash = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>);
+        const IconSettings = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>);
+        const IconBack = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></svg>);
+        const IconUpload = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" x2="12" y1="3" y2="15" /></svg>);
+        const IconSave = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>);
+        const IconGoogle = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className={className}><path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12s5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24s8.955,20,20,20s20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z" /><path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z" /><path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z" /><path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z" /></svg>);
+        const IconSun = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="5" /><path d="M12 1v2" /><path d="M12 21v2" /><path d="M4.22 4.22l1.42 1.42" /><path d="M18.36 18.36l1.42 1.42" /><path d="M1 12h2" /><path d="M21 12h2" /><path d="M4.22 19.78l1.42-1.42" /><path d="M18.36 5.64l1.42-1.42" /></svg>);
+        const IconMoon = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>);
+        const IconZen = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10" /><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" /></svg>);
+        const IconFont = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" /></svg>);
+        const IconFileText = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><line x1="10" y1="9" x2="8" y2="9" /></svg>);
+        const IconLayout = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="7" height="7" x="3" y="3" rx="1" /><rect width="7" height="7" x="14" y="3" rx="1" /><rect width="7" height="7" x="14" y="14" rx="1" /><rect width="7" height="7" x="3" y="14" rx="1" /><line x1="10" x2="14" y1="6.5" y2="6.5" /><line x1="10" x2="14" y1="17.5" y2="17.5" /><line x1="6.5" x2="6.5" y1="10" y2="14" /><line x1="17.5" x2="17.5" y1="10" y2="14" /></svg>);
+        const IconList = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="8" x2="21" y1="6" y2="6" /><line x1="8" x2="21" y1="12" y2="12" /><line x1="8" x2="21" y1="18" y2="18" /><line x1="3" x2="3.01" y1="6" y2="6" /><line x1="3" x2="3.01" y1="12" y2="12" /><line x1="3" x2="3.01" y1="18" y2="18" /></svg>);
+        const IconClipboard = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="8" height="4" x="8" y="2" rx="1" ry="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M9 12h6" /><path d="M9 16h6" /></svg>);
+        const getBezierPath = (x1, y1, x2, y2) => { const dx = x2 - x1; const dy = y2 - y1; const curvature = 0.5; const cx1 = x1 + dx * curvature; const cy1 = y1; const cx2 = x2 - dx * curvature; const cy2 = y2; return `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`; };
+        const getEdgeTargetPos = (from, to, offset = 12) => { const x1 = from.x + CARD_W / 2; const y1 = from.y + CARD_H / 2; const x2 = to.x + CARD_W / 2; const y2 = to.y + CARD_H / 2; const dx = x2 - x1; const dy = y2 - y1; const angle = Math.atan2(dy, dx); const absCos = Math.abs(Math.cos(angle)); const absSin = Math.abs(Math.sin(angle)); let distance = (CARD_W * absSin <= CARD_H * absCos) ? (CARD_W / 2) / absCos : (CARD_H / 2) / absSin; return { x: x2 - Math.cos(angle) * (distance + offset), y: y2 - Math.sin(angle) * (distance + offset) }; };
+        const getRoleBadgeStyle = (role) => { switch (role) { case '주인공': return 'bg-blue-600 dark:bg-blue-800 text-white'; case '적대자': return 'bg-red-600 dark:bg-red-800 text-white'; case '조력자': return 'bg-emerald-600 dark:bg-emerald-800 text-white'; case '조연': return 'bg-slate-500 text-white'; case '엑스트라': return 'bg-slate-300 text-slate-600'; default: return 'bg-slate-100 text-slate-500 border border-slate-200'; } };
+        const getStatusBadgeStyle = (status) => { switch (status || '초고') { case '초고': return 'bg-slate-200 text-slate-600 dark:bg-zinc-700 dark:text-zinc-300'; case '수정': return 'bg-amber-100 text-amber-600 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800'; case '완료': return 'bg-emerald-600 text-white'; default: return 'bg-slate-200 text-slate-600 dark:bg-zinc-700 dark:text-zinc-300'; } };
+        // 노드 타입별 색상 정의
+        const NODE_TYPE_COLORS = {
+            '인물': { sidebar: 'border-l-blue-500 dark:border-l-blue-400', selected: 'border-blue-500 dark:border-blue-400', bar: 'bg-blue-600 dark:bg-blue-600', text: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-500', hover: 'hover:bg-blue-50 dark:hover:bg-blue-950/50' },
+            '사건': { sidebar: 'border-l-red-500 dark:border-l-red-400', selected: 'border-red-500 dark:border-red-400', bar: 'bg-red-600 dark:bg-red-600', text: 'text-red-600 dark:text-red-400', bg: 'bg-red-500', hover: 'hover:bg-red-50 dark:hover:bg-red-950/50' },
+            '메모': { sidebar: 'border-l-amber-500 dark:border-l-amber-400', selected: 'border-amber-500 dark:border-amber-400', bar: 'bg-amber-500 dark:bg-amber-600', text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500', hover: 'hover:bg-amber-50 dark:hover:bg-amber-950/50' },
+            '장소': { sidebar: 'border-l-emerald-500 dark:border-l-emerald-400', selected: 'border-emerald-500 dark:border-emerald-400', bar: 'bg-emerald-600 dark:bg-emerald-600', text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500', hover: 'hover:bg-emerald-50 dark:hover:bg-emerald-950/50' },
+            '아이템': { sidebar: 'border-l-purple-500 dark:border-l-purple-400', selected: 'border-purple-500 dark:border-purple-400', bar: 'bg-purple-600 dark:bg-purple-600', text: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-500', hover: 'hover:bg-purple-50 dark:hover:bg-purple-950/50' },
+            '세력': { sidebar: 'border-l-orange-500 dark:border-l-orange-400', selected: 'border-orange-500 dark:border-orange-400', bar: 'bg-orange-600 dark:bg-orange-600', text: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-500', hover: 'hover:bg-orange-50 dark:hover:bg-orange-950/50' },
+            '복선': { sidebar: 'border-l-pink-500 dark:border-l-pink-400', selected: 'border-pink-500 dark:border-pink-400', bar: 'bg-pink-600 dark:bg-pink-600', text: 'text-pink-600 dark:text-pink-400', bg: 'bg-pink-500', hover: 'hover:bg-pink-50 dark:hover:bg-pink-950/50' },
+            '타임라인': { sidebar: 'border-l-teal-500 dark:border-l-teal-400', selected: 'border-teal-500 dark:border-teal-400', bar: 'bg-teal-600 dark:bg-teal-600', text: 'text-teal-600 dark:text-teal-400', bg: 'bg-teal-500', hover: 'hover:bg-teal-50 dark:hover:bg-teal-950/50' },
+            '설정': { sidebar: 'border-l-indigo-500 dark:border-l-indigo-400', selected: 'border-indigo-500 dark:border-indigo-400', bar: 'bg-indigo-600 dark:bg-indigo-600', text: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-500', hover: 'hover:bg-indigo-50 dark:hover:bg-indigo-950/50' },
+            '대사': { sidebar: 'border-l-sky-500 dark:border-l-sky-400', selected: 'border-sky-500 dark:border-sky-400', bar: 'bg-sky-600 dark:bg-sky-600', text: 'text-sky-600 dark:text-sky-400', bg: 'bg-sky-500', hover: 'hover:bg-sky-50 dark:hover:bg-sky-950/50' },
+            '갈등': { sidebar: 'border-l-rose-500 dark:border-l-rose-400', selected: 'border-rose-500 dark:border-rose-400', bar: 'bg-rose-600 dark:bg-rose-600', text: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500', hover: 'hover:bg-rose-50 dark:hover:bg-rose-950/50' },
+            '할일': { sidebar: 'border-l-cyan-500 dark:border-l-cyan-400', selected: 'border-cyan-500 dark:border-cyan-400', bar: 'bg-cyan-600 dark:bg-cyan-600', text: 'text-cyan-600 dark:text-cyan-400', bg: 'bg-cyan-500', hover: 'hover:bg-cyan-50 dark:hover:bg-cyan-950/50' },
+            '그룹': { sidebar: 'border-l-slate-500 dark:border-l-slate-400', selected: 'border-slate-500 dark:border-slate-400', bar: 'bg-slate-600 dark:bg-slate-600', text: 'text-slate-600 dark:text-slate-400', bg: 'bg-slate-500', hover: 'hover:bg-slate-50 dark:hover:bg-slate-800/50' }
+        };
+        // 노드 타입별 기본 이모지
+        const NODE_TYPE_EMOJIS = {
+            '인물': '👤', '사건': '🔥', '메모': '💡', '장소': '📍', '아이템': '🎁',
+            '세력': '⚔️', '복선': '🎣', '타임라인': '⏰', '설정': '📚', '대사': '💬', '갈등': '⚡', '할일': '✅', '그룹': '📁'
+        };
+        const getSidebarItemAccent = (node) => {
+            return NODE_TYPE_COLORS[node.type]?.sidebar || 'border-l-transparent';
+        };
+        const getSelectedBorderColor = (node) => {
+            return NODE_TYPE_COLORS[node.type]?.selected || 'border-indigo-500 dark:border-indigo-600';
+        };
+        const getNodeBarColor = (node) => {
+            return NODE_TYPE_COLORS[node.type]?.bar || 'bg-slate-500 dark:bg-slate-700';
+        };
+        const getStrokeDashArray = (style, width) => {
+            const w = width || 2;
+            switch (style) {
+                case 'dashed':
+                    // 굵기에 따라 파선 길이 비율 조정
+                    if (w >= 6) {
+                        return `${w * 3}, ${w * 2}`;
+                    }
+                    return `${w * 4}, ${w * 3}`;
+                case 'dotted': return `0, ${w * 2}`;
+                default: return "";
+            }
+        };
+
+        // Toast
+        const Toast = memo(({ message, type, onClose }) => (
+            <motion.div 
+                initial={{ y: 50, opacity: 0, scale: 0.9, x: '-50%' }} 
+                animate={{ y: 0, opacity: 1, scale: 1, x: '-50%' }} 
+                exit={{ y: 50, opacity: 0, scale: 0.9, x: '-50%' }} 
+                className="fixed bottom-10 left-1/2 z-[9999] flex items-center gap-3 bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900 px-6 py-3 rounded-full shadow-2xl"
+            >
+                <span className="text-sm font-bold">{message}</span>
+            </motion.div>
+        ));
+
+        // PomodoroTimer
+        const PomodoroTimer = ({
+            minutes, setMinutes,
+            seconds, setSeconds,
+            isActive, setIsActive,
+            initialTotal, setInitialTotal,
+            remaining, setRemaining,
+            isSetting, setIsSetting,
+            showToast
+        }) => {
+            const start = () => {
+                if (remaining <= 0) return;
+                setIsActive(true);
+            };
+            const stop = () => setIsActive(false);
+            const reset = () => {
+                setIsActive(false);
+                setRemaining(initialTotal);
+            };
+
+            const handleSetTime = () => {
+                const total = minutes * 60 + seconds;
+                if (total > 0) {
+                    setInitialTotal(total);
+                    setRemaining(total);
+                    setIsSetting(false);
+                } else {
+                    showToast("시간을 설정하세요", "error");
+                }
+            };
+
+            const format = (s) => {
+                const m = Math.floor(s / 60);
+                const sec = s % 60;
+                return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+            };
+
+            return (
+                <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="bg-white dark:bg-darkpanel border border-slate-200 dark:border-zinc-700 rounded-xl shadow-2xl overflow-hidden w-52 mt-2 pointer-events-auto"
+                >
+                    <div className="p-4">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-[12px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 bg-indigo-700 rounded-full animate-pulse"></span>
+                                뽀모도로 타이머
+                            </span>
+                            <button onClick={() => setIsSetting(!isSetting)} className="p-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-full transition-colors text-slate-400 hover:text-indigo-600">
+                                <IconSettings className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+
+                        {isSetting ? (
+                            <div className="space-y-4 py-1">
+                                <div className="flex gap-3">
+                                    <div className="flex-1">
+                                        <label className="text-[9px] font-black text-slate-400 block mb-1.5 uppercase">분</label>
+                                        <input type="number" value={minutes} onChange={e => setMinutes(parseInt(e.target.value) || 0)} className="w-full p-2 text-sm font-black bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded outline-none focus:border-indigo-500 dark:text-zinc-200" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="text-[9px] font-black text-slate-400 block mb-1.5 uppercase">초</label>
+                                        <input type="number" value={seconds} onChange={e => setSeconds(parseInt(e.target.value) || 0)} className="w-full p-2 text-sm font-black bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded outline-none focus:border-indigo-500 dark:text-zinc-200" />
+                                    </div>
+                                </div>
+                                <button onClick={handleSetTime} className="w-full py-2.5 bg-slate-900 dark:bg-indigo-600 text-white text-[11px] font-black rounded hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-500/20">적용하기</button>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="relative w-32 h-32 mx-auto my-2">
+                                    <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                                        {/* Background Circle */}
+                                        <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-100 dark:text-zinc-800" />
+
+                                        {/* Time Wedge (Elapsed) */}
+                                        <circle
+                                            cx="50" cy="50" r="22.5"
+                                            fill="none"
+                                            stroke="#ef4444"
+                                            strokeWidth="45"
+                                            strokeDasharray={2 * Math.PI * 22.5}
+                                            style={{
+                                                strokeDashoffset: (2 * Math.PI * 22.5) * (remaining / initialTotal),
+                                                transition: isActive ? 'stroke-dashoffset 1s linear' : 'none',
+                                            }}
+                                            className="opacity-80"
+                                        />
+
+                                        {/* Ticks */}
+                                        {[...Array(12)].map((_, i) => (
+                                            <line
+                                                key={i}
+                                                x1="50" y1="10" x2="50" y2="15"
+                                                transform={`rotate(${i * 30} 50 50)`}
+                                                stroke="currentColor"
+                                                strokeWidth="1"
+                                                className="text-slate-300 dark:text-zinc-600"
+                                            />
+                                        ))}
+                                    </svg>
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                        <span className="text-xs font-black text-slate-800 dark:text-zinc-100 font-mono bg-white/80 dark:bg-zinc-900/80 px-2 py-0.5 rounded-full shadow-sm border border-slate-100 dark:border-zinc-700 pointer-events-none">
+                                            {format(remaining)}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="flex gap-2 justify-center mt-4">
+                                    <button
+                                        onClick={() => isActive ? stop() : start()}
+                                        className={`flex-1 py-2.5 rounded-lg font-black text-[11px] transition-all tracking-widest ${isActive ? 'bg-amber-50 text-amber-600 hover:bg-amber-100 dark:bg-amber-900/20' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-500/20'}`}
+                                    >
+                                        {isActive ? "멈춤" : "시작"}
+                                    </button>
+                                    <button onClick={reset} className="px-3.5 py-2.5 bg-slate-100 dark:bg-zinc-800 text-slate-400 hover:text-red-500 rounded-lg transition-colors border border-slate-200 dark:border-zinc-700">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </motion.div>
+            );
+        };
+
+        // NodeCard - 노드 타입별 서브라인 렌더링
+        const getNodeSubline = (node) => {
+            switch (node.type) {
+                case '인물': return `${node.data.gender} · ${node.data.age ? `${node.data.age}세` : '나이 미상'} · ${node.data.job || '직업 없음'}`;
+                case '사건': return `📍 ${node.data.place || '장소 미상'} · 📅 ${node.data.year || '시기 미상'}`;
+                case '장소': return `🌍 ${node.data.region || '지역 미상'} · 🌤️ ${node.data.climate || '기후 미상'}`;
+                case '아이템': return `📦 ${node.data.category || '일반'} · ⭐ ${node.data.rarity || '보통'}`;
+                case '세력': return `👑 ${node.data.leader || '리더 미상'} · 🏰 ${node.data.territory || '영역 미상'}`;
+                case '복선': return `📖 ${node.data.chapter || '장 미상'} · ${node.data.status === '회수됨' ? '✅ 회수됨' : '🔄 미회수'}`;
+                case '타임라인': return `📅 ${node.data.date || '날짜 미상'} · 🏛️ ${node.data.era || '시대 미상'}`;
+                case '설정': return `📂 ${node.data.category || '세계관'} · 📏 ${node.data.scope || '범위 미상'}`;
+                case '대사': return `🗣️ ${node.data.speaker || '화자 미상'} · 💭 ${node.data.emotion || '감정 미상'}`;
+                case '갈등': return `⚔️ ${node.data.parties || '당사자 미상'} · ${node.data.status === '해결됨' ? '✅ 해결됨' : '🔥 진행중'}`;
+                case '할일': {
+                    const items = node.data.items || [];
+                    const done = items.filter(i => i.done).length;
+                    return `📋 ${done}/${items.length} 완료 · ${done === items.length && items.length > 0 ? '🎉 완료됨' : '🔥 진행중'}`;
+                }
+                case '그룹': return `📁 ${node.data.childNodes?.length || 0}개 항목`;
+                default: return '';
+            }
+        };
+        // 노드 타입별 뱃지 렌더링 (최상위 옵션은 빨간색)
+        const getNodeBadge = (node) => {
+            const topTierStyle = 'bg-red-600 text-white'; // 최상위 옵션 빨간색
+            switch (node.type) {
+                case '인물': return node.data.role ? { text: node.data.role, style: getRoleBadgeStyle(node.data.role) } : null;
+                case '복선': return { text: node.data.status || '미회수', style: node.data.status === '회수됨' ? 'bg-emerald-600 text-white' : 'bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400' };
+                case '갈등': return { text: node.data.status || '진행중', style: node.data.status === '해결됨' ? 'bg-emerald-600 text-white' : node.data.status === '격화' ? topTierStyle : 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400' };
+                case '아이템': return node.data.rarity ? { text: node.data.rarity, style: (node.data.rarity === '전설' || node.data.rarity === '유일') ? topTierStyle : node.data.rarity === '영웅' ? 'bg-amber-500 text-white' : node.data.rarity === '희귀' ? 'bg-purple-500 text-white' : node.data.rarity === '고급' ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-600 dark:bg-zinc-700 dark:text-zinc-300' } : null;
+                case '타임라인': return node.data.importance ? { text: node.data.importance, style: node.data.importance === '핵심' ? topTierStyle : node.data.importance === '중요' ? 'bg-teal-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-zinc-700 dark:text-zinc-300' } : null;
+                default: return null;
+            }
+        };
+        const NodeCard = memo(({ node, isTop, isSelected, isDragging, onMouseDown, onMouseUp, onDoubleClick, onDelete, onClick, onUpdateNode }) => {
+            const isIdea = node.type === '메모';
+            const isGroup = node.type === '그룹';
+            const isTodo = node.type === '할일';
+            let styleClass = isIdea ? "node-postit" : isGroup ? "node-glass" : isTodo ? "" : "node-glass";
+
+            // 인물 타입 특수 스타일
+            if (node.type === '인물') {
+                if (node.data.role === '주인공') styleClass += " node-protagonist";
+                else if (node.data.role === '적대자') styleClass += " node-antagonist";
+                else if (node.data.role === '조력자') styleClass += " node-helper";
+            } else if (node.type === '사건') styleClass += " node-event";
+            else if (isTodo) {
+                styleClass += " border border-cyan-300 bg-cyan-100 dark:bg-[#0c1e24] dark:border-cyan-900 shadow-sm rounded-[3px]";
+                // 모든 항목이 완료되었는지 확인
+                const items = node.data.items || [];
+                if (items.length > 0 && items.every(i => i.done)) {
+                    styleClass += " node-todo-complete";
+                }
+            }
+
+            // 그룹 노드 특수 스타일
+            if (isGroup) {
+                styleClass += " border-2 border-dashed";
+            }
+
+            const subline = getNodeSubline(node);
+            const badge = getNodeBadge(node);
+
+            // 투두 리스트 핸들러
+            const handleToggleTodo = (itemId) => {
+                const newItems = (node.data.items || []).map(item => 
+                    item.id === itemId ? { ...item, done: !item.done } : item
+                );
+                onUpdateNode(node.id, { items: newItems });
+            };
+
+            const handleDeleteTodo = (itemId) => {
+                const newItems = (node.data.items || []).filter(item => item.id !== itemId);
+                onUpdateNode(node.id, { items: newItems });
+            };
+
+            const handleAddTodo = (e) => {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.target.value.trim()) {
+                    const newItem = {
+                        id: generateUUID(),
+                        text: e.target.value.trim(),
+                        done: false
+                    };
+                    onUpdateNode(node.id, { items: [...(node.data.items || []), newItem] });
+                    e.target.value = '';
+                }
+            };
+
+            return (
+                <div onMouseDown={(e) => onMouseDown(e, node.id)} onMouseUp={(e) => onMouseUp(e, node.id)} onClick={(e) => { if (onClick && e.detail === 1) { e.stopPropagation(); onClick(e, node.id); } }} onDoubleClick={() => onDoubleClick(node.id)} style={{ zIndex: isTop ? 50 : (isGroup ? 5 : 10), width: CARD_W, height: isTodo ? 'auto' : CARD_H, minHeight: isTodo ? CARD_H : 'auto', transform: `translate(${node.x}px, ${node.y}px)`, position: 'absolute', top: 0, left: 0, transition: isDragging ? 'none' : 'transform 0.15s ease-out, box-shadow 0.2s', ...(isGroup && node.data.color ? { borderColor: node.data.color } : {}) }} className={`flex flex-col cursor-grab active:cursor-grabbing shadow-lg hover:shadow-xl group relative ${styleClass} ${isSelected ? `border-2 ${getSelectedBorderColor(node)}` : ''}`}>
+                    <button onClick={(e) => { e.stopPropagation(); if (confirm("이 노드를 삭제하시겠습니까?")) onDelete(node.id); }} className="absolute top-0 right-0 z-[100] w-6 h-6 flex items-center justify-center bg-white hover:bg-red-500 hover:text-white text-slate-400 border border-slate-200 rounded-[3px] shadow-md opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-1/2 -translate-y-1/2 dark:bg-zinc-800 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-red-600"><IconTrash className="w-3 h-3" /></button>
+                    <div className={`w-full flex flex-col rounded-[inherit] ${isTodo ? '' : 'h-full overflow-hidden'}`}>
+                        {(!isIdea && !isTodo) && <div className={`h-1.5 w-[calc(100%+4px)] -ml-[2px] -mt-[2px] shrink-0 ${getNodeBarColor(node)}`} />}
+                        <div className={`flex-1 flex flex-col p-4 pointer-events-none ${isTodo ? '' : 'overflow-hidden'}`}>
+                            <div className="flex items-center justify-between mb-2">
+                                <span className={`text-[10px] font-black uppercase tracking-widest ${isIdea ? 'text-yellow-800 dark:text-yellow-100' : 'text-slate-400 dark:text-zinc-50'}`}>{isIdea ? (node.data.category || '메모') : node.type}</span>
+                                {badge && <span className={`text-[9px] font-bold px-2 py-0.5 rounded-[3px] ${badge.style}`}>{badge.text}</span>}
+                            </div>
+                            <div className={`${isTodo ? 'text-lg' : 'text-xl'} font-black truncate mb-1.5 tracking-tight flex items-center ${isIdea ? 'text-slate-950 dark:text-yellow-50' : 'text-slate-900 dark:text-white'}`}>
+                                <span className="mr-2 drop-shadow-sm text-2xl">{node.data.emoji || NODE_TYPE_EMOJIS[node.type] || '📝'}</span>
+                                <span className={`truncate ${node.type === '사건' ? 'text-rose-700 dark:text-rose-400' : node.type === '갈등' ? 'text-rose-600 dark:text-rose-400' : ''}`}>{node.label}</span>
+                            </div>
+                            {subline && <div className={`${isTodo ? 'text-sm' : 'text-[11px]'} text-slate-500 dark:text-zinc-400 font-bold mb-2 truncate`}>{subline}</div>}
+                            
+                            {isTodo ? (
+                                <div className="flex-1 pointer-events-auto pr-1">
+                                    <div className="space-y-1 pb-2">
+                                        {(node.data.items || []).map(item => (
+                                             <div key={item.id} className="flex items-center gap-2 group/item">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={item.done} 
+                                                    onChange={() => handleToggleTodo(item.id)}
+                                                    onMouseDown={e => e.stopPropagation()}
+                                                    className="w-3 h-3 rounded-sm border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                                />
+                                                <span className={`text-base flex-1 break-words ${item.done ? 'line-through text-slate-400 dark:text-zinc-500' : 'text-slate-700 dark:text-zinc-300'}`}>{item.text}</span>
+                                            </div>
+                                        ))}
+                                        {(node.data.items || []).length === 0 && (
+                                            <div className="text-[10px] text-slate-400 text-center py-2 italic">더블클릭하여 할 일 추가</div>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className={`text-[12px] font-medium leading-tight line-clamp-3 grow ${isIdea ? 'text-slate-700 dark:text-yellow-100/80' : 'text-slate-500 bg-slate-50 p-2 rounded-[3px] border border-slate-100 italic dark:bg-zinc-900/60 dark:border-zinc-700/50 dark:text-zinc-400'}`}>{node.data.memo || "작성된 메모가 없습니다."}</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        });  // NodeCard 컴포넌트 끝
+
+        // GroupNode - 그룹 영역 노드
+        const GroupNode = memo(({ node, isSelected, isDragging, onMouseDown, onDoubleClick, onDelete, onResize }) => {
+            const width = node.data.width || 400;
+            const height = node.data.height || 300;
+            const color = node.data.color || '#94a3b8';
+            const [isResizing, setIsResizing] = useState(false);
+            const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
+            const resizeHandlersRef = useRef({ move: null, end: null });
+
+            // 컴포넌트 언마운트 시 이벤트 리스너 정리
+            useEffect(() => {
+                return () => {
+                    if (resizeHandlersRef.current.move) {
+                        document.removeEventListener('mousemove', resizeHandlersRef.current.move);
+                    }
+                    if (resizeHandlersRef.current.end) {
+                        document.removeEventListener('mouseup', resizeHandlersRef.current.end);
+                    }
+                };
+            }, []);
+
+            const handleResizeStart = (e, corner) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setIsResizing(true);
+                resizeStartRef.current = { x: e.clientX, y: e.clientY, width, height };
+
+                const handleResizeMove = (moveEvent) => {
+                    moveEvent.preventDefault();
+                    const scale = window.currentScale || 1;
+                    const dx = (moveEvent.clientX - resizeStartRef.current.x) / scale;
+                    const dy = (moveEvent.clientY - resizeStartRef.current.y) / scale;
+                    let newWidth = resizeStartRef.current.width;
+                    let newHeight = resizeStartRef.current.height;
+
+                    if (corner.includes('e')) newWidth = Math.max(200, resizeStartRef.current.width + dx);
+                    if (corner.includes('s')) newHeight = Math.max(150, resizeStartRef.current.height + dy);
+
+                    onResize(node.id, newWidth, newHeight);
+                };
+
+                const handleResizeEnd = () => {
+                    setIsResizing(false);
+                    document.removeEventListener('mousemove', handleResizeMove);
+                    document.removeEventListener('mouseup', handleResizeEnd);
+                    resizeHandlersRef.current = { move: null, end: null };
+                };
+
+                // ref에 핸들러 저장 (cleanup용)
+                resizeHandlersRef.current = { move: handleResizeMove, end: handleResizeEnd };
+
+                document.addEventListener('mousemove', handleResizeMove);
+                document.addEventListener('mouseup', handleResizeEnd);
+            };
+
+            return (
+                <div
+                    onMouseDown={(e) => {
+                        if (e.target.classList.contains('resize-handle')) return;
+                        onMouseDown(e, node.id);
+                    }}
+                    onDoubleClick={() => onDoubleClick(node.id)}
+                    style={{
+                        zIndex: 1,
+                        width: width,
+                        height: height,
+                        transform: `translate(${node.x}px, ${node.y}px)`,
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        borderColor: color,
+                        backgroundColor: `${color}15`,
+                        transition: (isResizing || isDragging) ? 'none' : 'transform 0.15s ease-out, box-shadow 0.2s',
+                    }}
+                    className={`cursor-grab active:cursor-grabbing group border-2 border-dashed rounded-[3px] ${isSelected ? 'border-solid shadow-lg' : ''}`}
+                >
+                    {/* 삭제 버튼 */}
+                    <button
+                        onClick={(e) => { e.stopPropagation(); if (confirm("이 그룹을 삭제하시겠습니까?")) onDelete(node.id); }}
+                        className="absolute top-0 right-0 z-[100] w-6 h-6 flex items-center justify-center bg-white hover:bg-red-500 hover:text-white text-slate-400 border border-slate-200 rounded-[3px] shadow-md opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-1/2 -translate-y-1/2 dark:bg-zinc-800 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-red-600"
+                    >
+                        <IconTrash className="w-3 h-3" />
+                    </button>
+
+                    {/* 좌측 상단 제목 */}
+                    <div
+                        className="absolute top-6 left-8 flex items-center gap-1.5 pointer-events-none"
+                        style={{ color: color }}
+                    >
+                        <span className="opacity-70" style={{ fontSize: '40px' }}>{node.data.emoji || '📁'}</span>
+                        <span className="text-xl font-black opacity-50" style={{ fontSize: '40px' }}>{node.label}</span>
+                        {node.data.memo && <span className="font-bold opacity-40 ml-3" style={{ fontSize: '20px' }}>{node.data.memo}</span>}
+                    </div>
+
+                    {/* 크기 조절 핸들 - 우하단 */}
+                    <div
+                        className="resize-handle absolute bottom-0 right-0 w-4 h-4 cursor-se-resize opacity-0 group-hover:opacity-100 transition-opacity"
+                        onMouseDown={(e) => handleResizeStart(e, 'se')}
+                        style={{ backgroundColor: color }}
+                    />
+                    {/* 크기 조절 핸들 - 우측 */}
+                    <div
+                        className="resize-handle absolute top-1/2 right-0 w-2 h-8 -translate-y-1/2 cursor-e-resize opacity-0 group-hover:opacity-100 transition-opacity rounded-l-sm"
+                        onMouseDown={(e) => handleResizeStart(e, 'e')}
+                        style={{ backgroundColor: color }}
+                    />
+                    {/* 크기 조절 핸들 - 하단 */}
+                    <div
+                        className="resize-handle absolute bottom-0 left-1/2 w-8 h-2 -translate-x-1/2 cursor-s-resize opacity-0 group-hover:opacity-100 transition-opacity rounded-t-sm"
+                        onMouseDown={(e) => handleResizeStart(e, 's')}
+                        style={{ backgroundColor: color }}
+                    />
+                </div>
+            );
+        });
+
+        // BookCover
+        const BookCover = memo(({ book, onClick, onDelete, onEdit, isDragging, isDropTarget, dragHandleProps }) => {
+            return (
+                <div
+                    className={`group perspective-1000 relative transition-transform duration-200 ${isDragging ? 'scale-105 z-50' : ''} ${isDropTarget ? 'scale-95' : ''}`}
+                    style={{ perspective: '1200px' }}
+                    onClick={onClick}
+                >
+                    <div className="absolute top-[8px] bottom-[8px] left-0 w-full bg-white shadow-sm transform translate-x-[9px] z-[1] border border-slate-200 opacity-40"></div>
+                    <div className="absolute top-[6px] bottom-[6px] left-0 w-full bg-white shadow-sm transform translate-x-[6px] z-[2] border border-slate-200 opacity-70"></div>
+                    <div className="absolute top-[4px] bottom-[4px] left-0 w-full bg-white shadow-sm transform translate-x-[3px] z-[3] border border-slate-200 opacity-90"></div>
+                    <div className="absolute top-[2px] bottom-[3px] left-[-1px] w-full page-bg shadow-sm transform translate-x-[1px] z-[4] border-l border-slate-200"></div>
+
+                    <motion.div initial={{ rotateY: 0 }} whileHover={(isDragging || isDropTarget) ? {} : { rotateY: -10 }} transition={{ type: "spring", stiffness: 200, damping: 15 }} className={`book-card relative left-[-1px] rounded-[3px] shadow-lg cursor-pointer flex flex-col origin-left z-10 h-full backdrop-blur-sm ${isDragging ? 'shadow-2xl ring-2 ring-indigo-400' : ''}`} style={{ aspectRatio: '2 / 3', outline: isDropTarget ? '2px dotted #818cf8' : 'none', outlineOffset: '-2px', opacity: isDropTarget ? 0.7 : 1, position: 'relative' }}>
+                        {/* 이미지 배경 */}
+                        {book.coverImage && (
+                            <div className="absolute inset-0 rounded-[3px]" style={{ backgroundImage: `linear-gradient(to top, rgba(0,0,0,0.16) 0%, rgba(0,0,0,0.05) 45%, transparent 100%), url('${sanitizeUrl(book.coverImage)}')`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.96, zIndex: 4 }}></div>
+                        )}
+                        {/* 색상 배경 (이미지가 없을 때) */}
+                        {!book.coverImage && (
+                            <div className="absolute inset-0 rounded-[3px]" style={{ backgroundColor: book.color || '#475569', opacity: 0.7, zIndex: 4 }}></div>
+                        )}
+                        {/* 색상 오버레이 (이미지가 없을 때는 전체색, 이미지 있을 때는 5% 오버레이) */}
+                        <div className="absolute inset-0 rounded-[3px]" style={{ backgroundColor: book.coverImage ? (book.color || '#475569') + '14' : (book.color || '#475569') + '1A', zIndex: 5 }}></div>
+                        <div className="absolute inset-0 book-spine pointer-events-none z-10"></div>
+                        <div className="absolute left-0 top-0 bottom-0 w-[15px] bg-black/10 z-10"></div>
+                        <div className="absolute inset-0 bg-gradient-to-br from-white/8 via-transparent to-black/5 z-15 pointer-events-none rounded-[3px]"></div>
+                        <div className="absolute inset-0 backdrop-blur-[2px] bg-white/12 z-15 pointer-events-none rounded-[3px]"></div>
+                        <div className="absolute inset-x-0 bottom-0 h-[34%] bg-gradient-to-t from-black/30 via-black/15 to-transparent z-15 pointer-events-none rounded-b-[3px]"></div>
+                        <div className="flex-1 p-8 flex flex-col relative z-20 text-white">
+                            {!book.coverImage && (
+                                <>
+                                    <div className="text-[10px] font-black opacity-60 uppercase tracking-widest mb-4 border-b border-white/20 pb-2">NOVEL PROJECT</div>
+                                    <h3 className="text-xl font-black leading-tight tracking-tight break-keep drop-shadow-md">{book.title}</h3>
+                                    <div className="mt-2 text-xs opacity-70">{book.author || "작가 미상"}</div>
+                                </>
+                            )}
+                            <div className="mt-auto pt-4">
+                                <div className="flex items-center justify-between gap-3 px-4 py-1 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-200 w-full max-w-[280px] rounded-[3px] border border-white/10 backdrop-blur-sm" style={{ backgroundColor: book.coverImage ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.05)' }}>
+                                    <div className="flex items-center gap-2 text-[11px] font-bold text-white/95">
+                                        <span className="opacity-90">보드</span> {book.projects?.filter(p => p.type === 'board').length || 0}
+                                        <span className="mx-1 opacity-70">|</span>
+                                        <span className="opacity-90">문서</span> {book.projects?.filter(p => p.type === 'doc').length || 0}
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div {...dragHandleProps} onClick={(e) => e.stopPropagation()} className="p-1 text-white/85 hover:text-white hover:bg-white/10 rounded-[3px] cursor-grab active:cursor-grabbing" title="드래그하여 순서 변경">
+                                            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+                                                <circle cx="5" cy="3" r="1.5" /><circle cx="11" cy="3" r="1.5" />
+                                                <circle cx="5" cy="8" r="1.5" /><circle cx="11" cy="8" r="1.5" />
+                                                <circle cx="5" cy="13" r="1.5" /><circle cx="11" cy="13" r="1.5" />
+                                            </svg>
+                                        </div>
+                                        <button onClick={(e) => { e.stopPropagation(); onEdit(book); }} className="p-1 text-white/85 hover:text-white hover:bg-white/10 rounded-[3px]" title="수정"><IconSettings className="w-4 h-4" /></button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+                </div>
+            );
+        }, (prevProps, nextProps) => {
+            return (
+                prevProps.book.id === nextProps.book.id &&
+                prevProps.book.title === nextProps.book.title &&
+                prevProps.book.author === nextProps.book.author &&
+                prevProps.book.color === nextProps.book.color &&
+                prevProps.book.coverImage === nextProps.book.coverImage &&
+                prevProps.book.projects?.length === nextProps.book.projects?.length &&
+                prevProps.isDragging === nextProps.isDragging &&
+                prevProps.isDropTarget === nextProps.isDropTarget
+            );
+        });
+
+        // BookListItem - 리스트 형식 보기
+        const BookListItem = memo(({ book, onClick, onEdit, isDragging, isDropTarget, dragHandleProps }) => {
+            return (
+                <div
+                    onClick={onClick}
+                    className={`group flex items-center gap-4 px-4 py-3 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg cursor-pointer transition-all duration-150 hover:border-indigo-300 dark:hover:border-indigo-600 hover:shadow-sm ${isDragging ? 'opacity-50 ring-2 ring-indigo-400' : ''} ${isDropTarget ? 'ring-2 ring-indigo-300 ring-dotted' : ''}`}
+                >
+                    <div className="w-8 h-11 rounded-[3px] shrink-0 shadow-sm overflow-hidden relative flex items-center justify-center" style={{ backgroundColor: book.coverImage ? 'transparent' : (book.color || '#475569') }}>
+                        {book.coverImage && (
+                            <div className="absolute inset-0" style={{ backgroundImage: `url('${sanitizeUrl(book.coverImage)}')`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.8 }}></div>
+                        )}
+                        {!book.coverImage && (
+                            <div className="absolute inset-0" style={{ backgroundColor: book.color || '#475569', opacity: 0.8 }}></div>
+                        )}
+                        {!book.coverImage && (
+                            <span className="relative z-10 text-[12px] font-black text-white/90 uppercase tracking-wide">{book.title?.charAt(0) || '?'}</span>
+                        )}
+                        <div className="absolute inset-0" style={{ backgroundColor: book.coverImage ? (book.color || '#475569') + '33' : 'transparent' }}></div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-black text-slate-800 dark:text-zinc-100 truncate">{book.title}</h3>
+                        <div className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">{book.author || "작가 미상"}</div>
+                    </div>
+                    <div className="hidden sm:flex items-center gap-2 text-[11px] font-bold text-slate-400 dark:text-zinc-500 shrink-0">
+                        <span>보드 {book.projects?.filter(p => p.type === 'board').length || 0}</span>
+                        <span className="opacity-40">|</span>
+                        <span>문서 {book.projects?.filter(p => p.type === 'doc').length || 0}</span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                        <div {...dragHandleProps} onClick={(e) => e.stopPropagation()} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 rounded-[3px] cursor-grab active:cursor-grabbing" title="드래그하여 순서 변경">
+                            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+                                <circle cx="5" cy="3" r="1.5" /><circle cx="11" cy="3" r="1.5" />
+                                <circle cx="5" cy="8" r="1.5" /><circle cx="11" cy="8" r="1.5" />
+                                <circle cx="5" cy="13" r="1.5" /><circle cx="11" cy="13" r="1.5" />
+                            </svg>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); onEdit(book); }} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:text-zinc-500 dark:hover:text-zinc-200 dark:hover:bg-zinc-800 rounded-[3px]" title="수정"><IconSettings className="w-4 h-4" /></button>
+                    </div>
+                </div>
+            );
+        }, (prevProps, nextProps) => {
+            return (
+                prevProps.book.id === nextProps.book.id &&
+                prevProps.book.title === nextProps.book.title &&
+                prevProps.book.author === nextProps.book.author &&
+                prevProps.book.color === nextProps.book.color &&
+                prevProps.book.projects?.length === nextProps.book.projects?.length &&
+                prevProps.isDragging === nextProps.isDragging &&
+                prevProps.isDropTarget === nextProps.isDropTarget
+            );
+        });
+
+        // BookSettingsModal
+        const BookSettingsModal = ({ onClose, onConfirm, initialData, onDelete }) => {
+            const [title, setTitle] = useState(initialData?.title || '새 작품');
+            const [author, setAuthor] = useState(initialData?.author || '');
+            const [selectedColor, setSelectedColor] = useState(initialData?.color || BOOK_COLORS[0]);
+            const [coverImage, setCoverImage] = useState(initialData?.coverImage || '');
+            const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+            const [deleteInput, setDeleteInput] = useState('');
+
+            const handleExportToWord = async () => {
+                if (!initialData) return;
+
+                // 라이브러리 로드 체크
+                if (!window.docx || !window.JSZip || !window.saveAs) {
+                    alert("필수 라이브러리(docx, jszip, FileSaver)가 로드되지 않았습니다. 인터넷 연결을 확인하거나 새로고침 해주세요.");
+                    return;
+                }
+
+                try {
+                    const zip = new JSZip();
+                    const { Document, Packer, Paragraph, TextRun, HeadingLevel } = window.docx;
+
+                    // 1. 보드(Board) 내보내기
+                    const boardProjects = initialData.projects.filter(p => p.type === 'board');
+                    for (const proj of boardProjects) {
+                        const doc = new Document({
+                            sections: [{
+                                children: [
+                                    new Paragraph({ text: `${proj.name} - 보드 데이터`, heading: HeadingLevel.HEADING_1 }),
+                                    ...proj.nodes.flatMap(node => [
+                                        new Paragraph({ text: "" }),
+                                        new Paragraph({
+                                            children: [
+                                                new TextRun({ text: `${node.data.emoji || '📍'} ${node.label}`, bold: true, size: 28 }),
+                                                new TextRun({ text: ` [${node.type}]`, size: 20, color: "666666" })
+                                            ]
+                                        }),
+                                        new Paragraph({
+                                            text: (() => {
+                                                switch (node.type) {
+                                                    case '인물': return `성별: ${node.data.gender} / 나이: ${node.data.age || '미상'} / 직업: ${node.data.job || '없음'}`;
+                                                    case '사건': return `장소: ${node.data.place || '미상'} / 시기: ${node.data.year || '미상'}`;
+                                                    case '장소': return `지역: ${node.data.region || '미상'} / 기후: ${node.data.climate || '미상'}`;
+                                                    case '아이템': return `분류: ${node.data.category || '일반'} / 희귀도: ${node.data.rarity || '보통'} / 소유자: ${node.data.owner || '없음'}`;
+                                                    case '세력': return `리더: ${node.data.leader || '미상'} / 영역: ${node.data.territory || '미상'}`;
+                                                    case '복선': return `등장: ${node.data.chapter || '미상'} / 상태: ${node.data.status || '미회수'}`;
+                                                    case '타임라인': return `시점: ${node.data.date || '미상'} / 시대: ${node.data.era || '미상'}`;
+                                                    case '설정': return `분류: ${node.data.category || '세계관'} / 범위: ${node.data.scope || '미상'}`;
+                                                    case '대사': return `화자: ${node.data.speaker || '미상'} / 감정: ${node.data.emotion || '미상'}`;
+                                                    case '갈등': return `당사자: ${node.data.parties || '미상'} / 상태: ${node.data.status || '진행중'}`;
+                                                    case '할일': {
+                                                        const items = node.data.items || [];
+                                                        const done = items.filter(i => i.done).length;
+                                                        return `진행률: ${done}/${items.length} (${items.length > 0 ? Math.round(done/items.length*100) : 0}%)`;
+                                                    }
+                                                    case '그룹': return `하위 노드: ${node.data.childNodes?.length || 0}개`;
+                                                    default: return "메모";
+                                                }
+                                            })(),
+                                            italic: true
+                                        }),
+                                        // 할일 목록 상세 출력
+                                        ...(node.type === '할일' && node.data.items && node.data.items.length > 0 ? [
+                                            new Paragraph({ text: "<할일 목록>", bold: true, spacing: { before: 100 } }),
+                                            ...node.data.items.map(item => new Paragraph({ 
+                                                text: `${item.done ? '☑' : '☐'} ${item.text}`,
+                                                bullet: { level: 0 }
+                                            }))
+                                        ] : []),
+                                        new Paragraph({ text: node.data.memo || "내용 없음" }),
+                                        new Paragraph({ text: "--------------------------------------------------" })
+                                    ])
+                                ]
+                            }]
+                        });
+                        const blob = await Packer.toBlob(doc);
+                        zip.file(`보드_${proj.name.replace(/[\/\*\\\?|:<>"]/g, '_')}.docx`, blob);
+                    }
+
+                    // 2. 문서(Doc) 내보내기
+                    const docProjects = initialData.projects.filter(p => p.type === 'doc');
+                    for (const proj of docProjects) {
+                        const lines = (proj.content || "").split('\n');
+                        const doc = new Document({
+                            sections: [{
+                                children: [
+                                    new Paragraph({ text: proj.name, heading: HeadingLevel.HEADING_1 }),
+                                    new Paragraph({ text: `상태: ${proj.status || '초고'} / 공백포함 ${proj.content?.length || 0}자`, spacing: { after: 200 } }),
+                                    // 시놉시스 추가
+                                    ...(proj.synopsis ? [
+                                        new Paragraph({ text: "<시놉시스>", heading: HeadingLevel.HEADING_3, spacing: { before: 200, after: 100 } }),
+                                        new Paragraph({ text: proj.synopsis, spacing: { after: 400 } }),
+                                        new Paragraph({ text: "--------------------------------------------------", spacing: { after: 400 } })
+                                    ] : []),
+                                    ...lines.map(line => new Paragraph({
+                                        children: [new TextRun({ text: line })],
+                                        spacing: { line: 360, before: 120 }
+                                    }))
+                                ]
+                            }]
+                        });
+                        const blob = await Packer.toBlob(doc);
+                        zip.file(`원고_${proj.name.replace(/[\/\*\\\?|:<>"]/g, '_')}.docx`, blob);
+                    }
+
+                    // 3. 압축 및 저장
+                    const content = await zip.generateAsync({ type: "blob" });
+                    window.saveAs(content, `${initialData.title}_word.zip`);
+
+                } catch (e) {
+                    console.error(e);
+                    alert("파일 생성 중 오류가 발생했습니다: " + e.message);
+                }
+            };
+
+            const handleSubmit = () => {
+                if (!title.trim()) { alert("작품 제목을 입력해주세요."); return; }
+                onConfirm(title, author, selectedColor, coverImage);
+            };
+
+            const handleKeyDown = (e) => {
+                if (e.key === 'Enter') handleSubmit();
+                if (e.key === 'Escape') onClose();
+            };
+
+            return showDeleteConfirm ? (
+                <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => { setShowDeleteConfirm(false); setDeleteInput(''); }}>
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-white dark:bg-darkpanel p-6 rounded-[3px] shadow-2xl w-[350px] border border-red-200 dark:border-red-800"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                                <IconTrash className="w-5 h-5 text-red-600 dark:text-red-400" />
+                            </div>
+                            <div>
+                                <h3 className="text-base font-black text-slate-800 dark:text-zinc-100">작품 삭제</h3>
+                                <p className="text-xs text-slate-500 dark:text-zinc-400">이 작업은 되돌릴 수 없습니다</p>
+                            </div>
+                        </div>
+                        <p className="text-sm text-slate-600 dark:text-zinc-300 mb-4">
+                            <span className="font-bold text-slate-800 dark:text-zinc-100">"{initialData?.title}"</span> 작품을 삭제하려면 아래에 <span className="font-black text-red-600 dark:text-red-400">삭제</span>를 입력하세요.
+                        </p>
+                        <input
+                            type="text"
+                            value={deleteInput}
+                            onChange={(e) => setDeleteInput(e.target.value)}
+                            className="w-full p-3 mb-4 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-[3px] text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-red-500 transition-colors"
+                            placeholder="삭제"
+                            autoFocus
+                        />
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => { setShowDeleteConfirm(false); setDeleteInput(''); }}
+                                className="flex-1 py-2.5 text-xs font-bold text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded-[3px] transition-colors"
+                            >
+                                취소
+                            </button>
+                            <button
+                                onClick={() => { if (deleteInput === '삭제') { onDelete(initialData.id); onClose(); } }}
+                                disabled={deleteInput !== '삭제'}
+                                className={`flex-1 py-2.5 text-xs font-black rounded-[3px] transition-colors ${deleteInput === '삭제' ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-slate-200 dark:bg-zinc-700 text-slate-400 dark:text-zinc-500 cursor-not-allowed'}`}
+                            >
+                                삭제하기
+                            </button>
+                        </div>
+                    </motion.div>
+                </div>
+            ) : (
+                <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+                    <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white dark:bg-darkpanel p-8 rounded-[3px] shadow-2xl w-[450px] border border-slate-200 dark:border-zinc-700" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-6">
+                            <h2 className="text-lg font-black text-slate-800 dark:text-zinc-100">{initialData ? '작품 설정 수정' : '새 작품 만들기'}</h2>
+                            {initialData && (
+                                <div className="flex items-center gap-2">
+                                    <button onClick={handleExportToWord} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 transition-colors border border-blue-200 dark:border-blue-800 rounded-sm">
+                                        {/* 워드 아이콘 SVG */}
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                                            <polyline points="14 2 14 8 20 8" />
+                                            <path d="M8 13l1.5 4 1.5-3 1.5 3 1.5-4" />
+                                        </svg>
+                                        <span className="text-[10px] font-black">Word 저장</span>
+                                    </button>
+                                    <button onClick={() => setShowDeleteConfirm(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 transition-colors border border-red-200 dark:border-red-800 rounded-sm">
+                                        <IconTrash className="w-3.5 h-3.5" />
+                                        <span className="text-[10px] font-black">삭제</span>
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                        <div className="mb-4">
+                            <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-2 uppercase tracking-wide">작품 제목</label>
+                            <input autoFocus type="text" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={handleKeyDown} className="w-full p-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-[3px] text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-indigo-500 transition-colors" placeholder="작품 제목을 입력하세요" />
+                        </div>
+                        <div className="mb-6">
+                            <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-2 uppercase tracking-wide">작가 이름 (필명)</label>
+                            <input type="text" value={author} onChange={(e) => setAuthor(e.target.value)} onKeyDown={handleKeyDown} className="w-full p-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-[3px] text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-indigo-500 transition-colors" placeholder="작가명을 입력하세요 (선택)" />
+                        </div>
+                        <div className="mb-8">
+                            <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-3 uppercase tracking-wide">표지 색상</label>
+                            <div className="flex flex-wrap gap-2"> {BOOK_COLORS.map(color => (<button key={color} onClick={() => setSelectedColor(color)} className={`w-8 h-8 rounded-[3px] shadow-sm transition-transform hover:scale-110 flex items-center justify-center ${selectedColor === color ? 'ring-2 ring-offset-2 ring-indigo-500 dark:ring-offset-darkpanel' : ''}`} style={{ backgroundColor: color }}> {selectedColor === color && <svg className="w-4 h-4 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>} </button>))} </div>
+                        </div>
+                        <div className="mb-8">
+                            <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-2 uppercase tracking-wide">표지 이미지 URL (선택)</label>
+                            <input type="text" value={coverImage} onChange={(e) => setCoverImage(e.target.value)} onKeyDown={handleKeyDown} className="w-full p-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-[3px] text-slate-900 dark:text-zinc-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors" placeholder="https://example.com/cover.jpg" />
+                            {coverImage && (
+                                <div className="mt-3 p-3 bg-slate-100 dark:bg-zinc-700 rounded-[3px] border border-slate-200 dark:border-zinc-600">
+                                    <p className="text-[11px] text-slate-600 dark:text-zinc-300 mb-2 font-semibold">미리보기:</p>
+                                    <div className="relative w-24 h-36 rounded-[2px] overflow-hidden shadow-sm" style={{ aspectRatio: '2/3', backgroundColor: selectedColor + '4d' }}>
+                                        <div style={{ position: 'absolute', inset: 0, backgroundImage: `url('${sanitizeUrl(coverImage)}')`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: 0.7 }}></div>
+                                        <div style={{ position: 'absolute', inset: 0, backgroundColor: selectedColor + '4d' }}></div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={onClose} className="flex-1 py-3 text-xs font-bold text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded-[3px] transition-colors">취소</button>
+                            <button onClick={handleSubmit} className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-[3px] shadow-md transition-colors dark:bg-indigo-700 dark:hover:bg-indigo-600">{initialData ? '저장하기' : '만들기'}</button>
+                        </div>
+                    </motion.div>
+                </div>
+            );
+        };
+
+        // ExportModal 컴포넌트 추가
+        const ExportModal = ({ onClose, onConfirm }) => {
+            const now = new Date();
+            const defaultFilename = `sagak_studio_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+
+            const [filename, setFilename] = useState(defaultFilename);
+            const [exportType, setExportType] = useState('json');
+            const [password, setPassword] = useState('');
+            const [passwordConfirm, setPasswordConfirm] = useState('');
+
+            const handleSubmit = () => {
+                if (!filename.trim()) {
+                    alert("파일명을 입력해주세요.");
+                    return;
+                }
+
+                if (exportType === 'vel') {
+                    if (!password) {
+                        alert("암호를 입력해주세요.");
+                        return;
+                    }
+                    if (password !== passwordConfirm) {
+                        alert("암호가 일치하지 않습니다.");
+                        return;
+                    }
+                }
+
+                onConfirm(filename, exportType, password);
+            };
+
+            return (
+                <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-white dark:bg-darkpanel p-8 rounded-sm shadow-2xl w-[450px] border border-slate-200 dark:border-zinc-700"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <h2 className="text-lg font-black text-slate-800 dark:text-zinc-100 mb-6">파일 저장</h2>
+                        <div className="mb-6">
+                            <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-2 uppercase">파일명</label>
+                            <div className="flex gap-2">
+                                <input
+                                    autoFocus
+                                    type="text"
+                                    value={filename}
+                                    onChange={(e) => setFilename(e.target.value)}
+                                    className="flex-1 p-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-sm text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-indigo-500 transition-colors"
+                                    placeholder="파일명 입력"
+                                />
+                                <select
+                                    value={exportType}
+                                    onChange={(e) => setExportType(e.target.value)}
+                                    className="px-4 py-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-sm text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-indigo-500 transition-colors cursor-pointer"
+                                >
+                                    <option value="json">일반 (.json)</option>
+                                    <option value="vel">암호화 (.vel)</option>
+                                </select>
+                            </div>
+                        </div>
+                        {exportType === 'vel' && (
+                            <div className="mb-6 space-y-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-2 uppercase">암호</label>
+                                    <input
+                                        type="password"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        className="w-full p-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-sm text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-indigo-500 transition-colors"
+                                        placeholder="암호 입력"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-2 uppercase">암호 확인</label>
+                                    <input
+                                        type="password"
+                                        value={passwordConfirm}
+                                        onChange={(e) => setPasswordConfirm(e.target.value)}
+                                        className="w-full p-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-sm text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-indigo-500 transition-colors"
+                                        placeholder="암호 재입력"
+                                    />
+                                </div>
+                            </div>
+                        )}
+                        <div className="flex gap-2">
+                            <button
+                                onClick={onClose}
+                                className="flex-1 py-3 text-xs font-bold text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded-sm transition-colors"
+                            >
+                                취소
+                            </button>
+                            <button
+                                onClick={handleSubmit}
+                                className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-sm shadow-md transition-colors dark:bg-indigo-700 dark:hover:bg-indigo-600"
+                            >
+                                저장하기
+                            </button>
+                        </div>
+                    </motion.div>
+                </div>
+            );
+        };
+
+        const NameGenerator = ({ onConfirm, onClose, settings, onSettingsChange }) => {
+            // 부모로부터 받은 settings가 있으면 그것을 초기값으로 사용
+            const [genre, setGenre] = useState(settings?.genre || 'korean');
+            const [role, setRole] = useState(settings?.role || 'modern');
+            const [gender, setGender] = useState(settings?.gender || 'random');
+            const [generatedName, setGeneratedName] = useState(null);
+
+            // 설정이 변경될 때마다 부모(Workspace)에 저장 (기억하기)
+            useEffect(() => {
+                if (onSettingsChange) {
+                    onSettingsChange({ genre, role, gender });
+                }
+            }, [genre, role, gender, onSettingsChange]);
+
+            const handleGenerate = () => {
+                const dataSet = NAME_DB[genre][role];
+                if (!dataSet) return;
+
+                let targetGender = gender;
+                if (targetGender === 'random') {
+                    targetGender = Math.random() < 0.5 ? 'm' : 'f';
+                }
+
+                const nameList = targetGender === 'm' ? dataSet.m : dataSet.f;
+                const surnameList = dataSet.s;
+
+                const rawName = nameList[Math.floor(Math.random() * nameList.length)];
+                const rawSurname = surnameList[Math.floor(Math.random() * surnameList.length)];
+
+                let fullName = "";
+
+                if (genre === 'fantasy') {
+                    const [krName, enName] = rawName.split('|');
+                    const [krSur, enSur] = rawSurname.split('|');
+                    if (krSur === "(성 없음)") {
+                        fullName = `${krName} (${enName})`;
+                    } else {
+                        fullName = `${krName} ${krSur} (${enName} ${enSur})`;
+                    }
+                } else if (genre === 'wuxia') {
+                    const krName = rawName.split('|')[0];
+                    const krSur = rawSurname.split('|')[0];
+                    fullName = `${krSur}${krName}`;
+                } else {
+                    fullName = `${rawSurname}${rawName}`;
+                }
+                setGeneratedName(fullName);
+            };
+
+            // 장르 변경 핸들러 (장르를 바꿀 때만 역할을 첫 번째 항목으로 초기화)
+            const handleGenreChange = (e) => {
+                const newGenre = e.target.value;
+                setGenre(newGenre);
+
+                // 장르가 바뀌면 해당 장르의 첫 번째 역할로 자동 변경
+                if (NAME_ROLES[newGenre] && NAME_ROLES[newGenre].length > 0) {
+                    setRole(NAME_ROLES[newGenre][0].id);
+                }
+            };
+
+            useEffect(() => {
+                if (!generatedName) handleGenerate();
+            }, []);
+
+            return (
+                <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mt-4 border-t border-slate-200 dark:border-zinc-700 pt-4 overflow-hidden"
+                >
+                    <div className="bg-slate-50 dark:bg-zinc-800/50 p-4 rounded-[3px] border border-slate-200 dark:border-zinc-700 mb-3">
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest dark:text-zinc-400">🎲 이름 생성기</h3>
+                            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M18 6L6 18M6 6l12 12" /></svg></button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                            {/* onChange 핸들러 교체 */}
+                            <select value={genre} onChange={handleGenreChange} className="p-2 text-xs font-bold rounded-[3px] border border-slate-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 outline-none">
+                                <option value="korean">🏙️ 현대 한국</option>
+                                <option value="fantasy">⚔️ 판타지</option>
+                                <option value="wuxia">🐉 무협</option>
+                            </select>
+                            <select value={gender} onChange={(e) => setGender(e.target.value)} className="p-2 text-xs font-bold rounded-[3px] border border-slate-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 outline-none">
+                                <option value="random">🎲 성별 랜덤</option>
+                                <option value="m">‍♂️ 남성</option>
+                                <option value="f">‍♀️ 여성</option>
+                            </select>
+                            <select value={role} onChange={(e) => setRole(e.target.value)} className="col-span-2 p-2 text-xs font-bold rounded-[3px] border border-slate-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 outline-none">
+                                {NAME_ROLES[genre].map(r => (
+                                    <option key={r.id} value={r.id}>{r.text}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div
+                            onClick={() => generatedName && onConfirm(generatedName)}
+                            className="bg-white dark:bg-zinc-700 p-3 rounded-[3px] border border-dashed border-indigo-300 dark:border-zinc-500 text-center cursor-pointer hover:bg-indigo-50 dark:hover:bg-zinc-600 transition-colors group relative"
+                        >
+                            <div className="text-sm font-black text-slate-800 dark:text-white break-keep leading-snug">
+                                {generatedName || "생성 중..."}
+                            </div>
+                            <div className="text-[9px] text-indigo-400 dark:text-indigo-300 font-bold mt-1 opacity-0 group-hover:opacity-100 transition-opacity">클릭하여 적용</div>
+                        </div>
+
+                        <button onClick={handleGenerate} className="w-full mt-2 py-2 bg-indigo-600 text-white text-xs font-black rounded-[3px] shadow-sm hover:bg-indigo-700 transition-colors dark:bg-indigo-700 dark:hover:bg-indigo-600">
+                            새로운 이름 생성
+                        </button>
+                    </div>
+                </motion.div>
+            );
+        };
+
+        const ImportModal = ({ onClose, onConfirm, fileData, isEncrypted }) => {
+            const [password, setPassword] = useState('');
+            const [importMode, setImportMode] = useState('replace'); // 'replace' 또는 'append'
+            const [step, setStep] = useState(isEncrypted ? 'password' : 'mode'); // 'password' 또는 'mode'
+            const [decryptedData, setDecryptedData] = useState(null);
+
+            const handlePasswordSubmit = async () => {
+                if (!password.trim()) {
+                    alert("암호를 입력해주세요.");
+                    return;
+                }
+
+                try {
+                    const decryptedText = await window.SagakCrypto.decryptCompat(fileData, password);
+                    if (!decryptedText) throw new Error("Decryption failed");
+                    const parsed = JSON.parse(decryptedText);
+                    const validated = validateAndSanitizeImportData(parsed);
+                    if (!validated) throw new Error("유효하지 않은 데이터 구조입니다.");
+                    setDecryptedData(validated);
+                    setStep('mode');
+                } catch (error) {
+                    alert("비밀번호가 틀리거나 손상된 파일입니다.");
+                }
+            };
+
+            const handleImport = () => {
+                let dataToImport = isEncrypted ? decryptedData : JSON.parse(fileData);
+                dataToImport = validateAndSanitizeImportData(dataToImport);
+                if (!dataToImport) {
+                    alert("유효하지 않은 데이터 포맷입니다.");
+                    return;
+                }
+                onConfirm(dataToImport, importMode === 'replace');
+            };
+
+            const handleKeyDown = (e) => {
+                if (e.key === 'Enter') {
+                    if (step === 'password') {
+                        handlePasswordSubmit();
+                    } else {
+                        handleImport();
+                    }
+                }
+                if (e.key === 'Escape') onClose();
+            };
+
+            return (
+                <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-white dark:bg-darkpanel p-8 rounded-sm shadow-2xl w-[450px] border border-slate-200 dark:border-zinc-700"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        {step === 'password' ? (
+                            <>
+                                <h2 className="text-lg font-black text-slate-800 dark:text-zinc-100 mb-6">암호화된 파일</h2>
+
+                                <div className="mb-6">
+                                    <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-2 uppercase">암호 입력</label>
+                                    <input
+                                        autoFocus
+                                        type="password"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        onKeyDown={handleKeyDown}
+                                        className="w-full p-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-sm text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-indigo-500 transition-colors"
+                                        placeholder="파일 암호를 입력하세요"
+                                    />
+                                </div>
+
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={onClose}
+                                        className="flex-1 py-3 text-xs font-bold text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded-sm transition-colors"
+                                    >
+                                        취소
+                                    </button>
+                                    <button
+                                        onClick={handlePasswordSubmit}
+                                        className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-sm shadow-md transition-colors dark:bg-indigo-700 dark:hover:bg-indigo-600"
+                                    >
+                                        확인
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <h2 className="text-lg font-black text-slate-800 dark:text-zinc-100 mb-6">파일 불러오기</h2>
+
+                                <div className="mb-6">
+                                    <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-3 uppercase">불러오기 방식</label>
+                                    <div className="space-y-2">
+                                        <button
+                                            onClick={() => setImportMode('replace')}
+                                            className={`w-full p-4 rounded-sm border-2 font-bold text-sm transition-all text-left ${importMode === 'replace'
+                                                ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
+                                                : 'border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300'
+                                                }`}
+                                        >
+                                            <div className="font-black mb-1">덮어쓰기</div>
+                                            <div className="text-xs opacity-70">기존 서재를 삭제하고 불러온 파일로 대체합니다</div>
+                                        </button>
+                                        <button
+                                            onClick={() => setImportMode('append')}
+                                            className={`w-full p-4 rounded-sm border-2 font-bold text-sm transition-all text-left ${importMode === 'append'
+                                                ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
+                                                : 'border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300'
+                                                }`}
+                                        >
+                                            <div className="font-black mb-1">추가하기</div>
+                                            <div className="text-xs opacity-70">기존 서재 뒤에 불러온 파일을 추가합니다</div>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={onClose}
+                                        className="flex-1 py-3 text-xs font-bold text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded-sm transition-colors"
+                                    >
+                                        취소
+                                    </button>
+                                    <button
+                                        onClick={handleImport}
+                                        className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-sm shadow-md transition-colors dark:bg-indigo-700 dark:hover:bg-indigo-600"
+                                    >
+                                        불러오기
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </motion.div>
+                </div>
+            );
+        };
+
+        // FilePanel - 내부 창 방식의 저장/불러오기 패널
+        const FilePanel = ({ isOpen, mode, onClose, books, onExport, onFileSelect, importData, onConfirmImport }) => {
+            const [filename, setFilename] = useState('sagak_backup');
+            const [exportType, setExportType] = useState('json');
+            const [password, setPassword] = useState('');
+            const [passwordConfirm, setPasswordConfirm] = useState('');
+            const [importMode, setImportMode] = useState('replace');
+            const [importPassword, setImportPassword] = useState('');
+            const [decryptedData, setDecryptedData] = useState(null);
+            const [importStep, setImportStep] = useState('select'); // 'select', 'password', 'mode'
+            const fileInputRef = useRef(null);
+
+            // 패널이 열릴 때 상태 초기화
+            useEffect(() => {
+                if (isOpen) {
+                    if (mode === 'save') {
+                        setFilename('sagak_backup');
+                        setExportType('json');
+                        setPassword('');
+                        setPasswordConfirm('');
+                    } else {
+                        setImportStep('select');
+                        setImportPassword('');
+                        setDecryptedData(null);
+                        setImportMode('replace');
+                    }
+                }
+            }, [isOpen, mode]);
+
+            // importData가 변경되면 처리
+            useEffect(() => {
+                if (importData) {
+                    if (importData.isEncrypted) {
+                        setImportStep('password');
+                    } else {
+                        setImportStep('mode');
+                    }
+                }
+            }, [importData]);
+
+            const handleSave = () => {
+                if (!filename.trim()) {
+                    alert("파일명을 입력해주세요.");
+                    return;
+                }
+                if (exportType === 'vel') {
+                    if (!password.trim()) {
+                        alert("암호를 입력해주세요.");
+                        return;
+                    }
+                    if (password !== passwordConfirm) {
+                        alert("암호가 일치하지 않습니다.");
+                        return;
+                    }
+                }
+                onExport(filename, exportType, password);
+                onClose();
+            };
+
+            const handleDecrypt = async () => {
+                if (!importPassword.trim()) {
+                    alert("암호를 입력해주세요.");
+                    return;
+                }
+                try {
+                    const decryptedText = await window.SagakCrypto.decryptCompat(importData.content, importPassword);
+                    if (!decryptedText) throw new Error("Decryption failed");
+                    const parsed = JSON.parse(decryptedText);
+                    const validated = validateAndSanitizeImportData(parsed);
+                    if (!validated) throw new Error("유효하지 않은 데이터 구조입니다.");
+                    setDecryptedData(validated);
+                    setImportStep('mode');
+                } catch (error) {
+                    alert("비밀번호가 틀리거나 손상된 파일입니다.");
+                }
+            };
+
+            const handleImport = () => {
+                let dataToImport = importData.isEncrypted ? decryptedData : JSON.parse(importData.content);
+                dataToImport = validateAndSanitizeImportData(dataToImport);
+                if (!dataToImport) {
+                    alert("유효하지 않은 데이터 포맷입니다.");
+                    return;
+                }
+                onConfirmImport(dataToImport, importMode === 'replace');
+                onClose();
+            };
+
+            if (!isOpen) return null;
+
+            return (
+                <motion.div
+                    initial={{ x: '100%' }}
+                    animate={{ x: 0 }}
+                    exit={{ x: '100%' }}
+                    transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                    className="fixed top-0 right-0 h-full w-[420px] bg-white dark:bg-darkpanel shadow-2xl z-[100] flex flex-col border-l border-slate-200 dark:border-zinc-700"
+                >
+                    <div className="h-16 px-6 flex items-center justify-between border-b border-slate-200 dark:border-zinc-700 shrink-0">
+                        <h2 className="text-lg font-black text-slate-800 dark:text-zinc-100">
+                            {mode === 'save' ? '파일 저장' : '파일 불러오기'}
+                        </h2>
+                        <button
+                            onClick={onClose}
+                            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200 rounded-sm transition-colors"
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <path d="M18 6L6 18M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-6">
+                        {mode === 'save' ? (
+                            <div className="space-y-6">
+                                {/* 파일명 */}
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-2 uppercase tracking-wide">파일명</label>
+                                    <input
+                                        type="text"
+                                        value={filename}
+                                        onChange={(e) => setFilename(e.target.value)}
+                                        className="w-full p-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-sm text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-indigo-500 transition-colors"
+                                        placeholder="파일명 입력"
+                                    />
+                                </div>
+
+                                {/* 저장 형식 */}
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-3 uppercase tracking-wide">저장 형식</label>
+                                    <div className="space-y-2">
+                                        <button
+                                            onClick={() => setExportType('json')}
+                                            className={`w-full p-4 rounded-sm border-2 font-bold text-sm transition-all text-left ${exportType === 'json'
+                                                ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
+                                                : 'border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300'
+                                                }`}
+                                        >
+                                            <div className="font-black mb-1">일반 저장 (.json)</div>
+                                            <div className="text-xs opacity-70">암호화 없이 일반 JSON 형식으로 저장</div>
+                                        </button>
+                                        <button
+                                            onClick={() => setExportType('vel')}
+                                            className={`w-full p-4 rounded-sm border-2 font-bold text-sm transition-all text-left ${exportType === 'vel'
+                                                ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
+                                                : 'border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300'
+                                                }`}
+                                        >
+                                            <div className="font-black mb-1">암호화 저장 (.vel)</div>
+                                            <div className="text-xs opacity-70">암호를 설정하여 안전하게 저장</div>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* 암호 입력 (vel 선택 시) */}
+                                <AnimatePresence>
+                                    {exportType === 'vel' && (
+                                        <motion.div
+                                            initial={{ opacity: 0, height: 0 }}
+                                            animate={{ opacity: 1, height: 'auto' }}
+                                            exit={{ opacity: 0, height: 0 }}
+                                            className="space-y-4 overflow-hidden"
+                                        >
+                                            <div>
+                                                <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-2 uppercase tracking-wide">암호</label>
+                                                <input
+                                                    type="password"
+                                                    value={password}
+                                                    onChange={(e) => setPassword(e.target.value)}
+                                                    className="w-full p-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-sm text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-indigo-500 transition-colors"
+                                                    placeholder="암호 입력"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-2 uppercase tracking-wide">암호 확인</label>
+                                                <input
+                                                    type="password"
+                                                    value={passwordConfirm}
+                                                    onChange={(e) => setPasswordConfirm(e.target.value)}
+                                                    className="w-full p-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-sm text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-indigo-500 transition-colors"
+                                                    placeholder="암호 재입력"
+                                                />
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+
+                                <div className="p-4 bg-slate-50 dark:bg-zinc-800/50 rounded-sm border border-slate-200 dark:border-zinc-700">
+                                    <div className="text-xs font-bold text-slate-500 dark:text-zinc-400 uppercase mb-2">저장 정보</div>
+                                    <div className="text-sm font-medium text-slate-700 dark:text-zinc-300">
+                                        <div className="flex justify-between mb-1">
+                                            <span>총 작품 수</span>
+                                            <span className="font-black">{books.length}개</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span>저장 형식</span>
+                                            <span className="font-black">{exportType === 'json' ? 'JSON' : '암호화 (VEL)'}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-6">
+                                {importStep === 'select' && (
+                                    <>
+                                        <div className="text-center py-10">
+                                            <div className="w-20 h-20 mx-auto mb-4 bg-slate-100 dark:bg-zinc-800 rounded-full flex items-center justify-center">
+                                                <IconUpload className="w-8 h-8 text-slate-400 dark:text-zinc-500" />
+                                            </div>
+                                            <p className="text-sm font-bold text-slate-600 dark:text-zinc-400 mb-1">파일을 선택해주세요</p>
+                                            <p className="text-xs text-slate-400 dark:text-zinc-500">.json 또는 .vel 파일을 지원합니다</p>
+                                        </div>
+                                        <button
+                                            onClick={() => fileInputRef.current?.click()}
+                                            className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm rounded-sm shadow-md transition-colors dark:bg-indigo-700 dark:hover:bg-indigo-600"
+                                        >
+                                            파일 선택
+                                        </button>
+                                        <input
+                                            type="file"
+                                            ref={fileInputRef}
+                                            onChange={(e) => {
+                                                const file = e.target.files[0];
+                                                if (file) onFileSelect(file);
+                                                e.target.value = '';
+                                            }}
+                                            className="hidden"
+                                            accept=".json,.vel"
+                                        />
+                                    </>
+                                )}
+
+                                {importStep === 'password' && (
+                                    <>
+                                        <div className="text-center py-6">
+                                            <div className="w-16 h-16 mx-auto mb-4 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center">
+                                                <svg className="w-7 h-7 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                                </svg>
+                                            </div>
+                                            <p className="text-sm font-black text-slate-700 dark:text-zinc-300 mb-1">암호화된 파일</p>
+                                            <p className="text-xs text-slate-400 dark:text-zinc-500">파일을 열려면 암호를 입력하세요</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-2 uppercase tracking-wide">암호 입력</label>
+                                            <input
+                                                type="password"
+                                                value={importPassword}
+                                                onChange={(e) => setImportPassword(e.target.value)}
+                                                onKeyDown={(e) => e.key === 'Enter' && handleDecrypt()}
+                                                className="w-full p-3 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-sm text-slate-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-indigo-500 transition-colors"
+                                                placeholder="파일 암호를 입력하세요"
+                                                autoFocus
+                                            />
+                                        </div>
+                                        <div className="flex gap-2 pt-2">
+                                            <button
+                                                onClick={() => setImportStep('select')}
+                                                className="flex-1 py-3 text-xs font-bold text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded-sm transition-colors"
+                                            >
+                                                다른 파일
+                                            </button>
+                                            <button
+                                                onClick={handleDecrypt}
+                                                className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-sm shadow-md transition-colors dark:bg-indigo-700 dark:hover:bg-indigo-600"
+                                            >
+                                                확인
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+
+                                {importStep === 'mode' && (
+                                    <>
+                                        <div className="text-center py-4">
+                                            <div className="w-14 h-14 mx-auto mb-3 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center">
+                                                <svg className="w-6 h-6 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                                </svg>
+                                            </div>
+                                            <p className="text-sm font-black text-slate-700 dark:text-zinc-300">파일 준비 완료</p>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-500 dark:text-zinc-400 mb-3 uppercase tracking-wide">불러오기 방식</label>
+                                            <div className="space-y-2">
+                                                <button
+                                                    onClick={() => setImportMode('replace')}
+                                                    className={`w-full p-4 rounded-sm border-2 font-bold text-sm transition-all text-left ${importMode === 'replace'
+                                                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
+                                                        : 'border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300'
+                                                        }`}
+                                                >
+                                                    <div className="font-black mb-1">덮어쓰기</div>
+                                                    <div className="text-xs opacity-70">기존 서재를 삭제하고 불러온 파일로 대체합니다</div>
+                                                </button>
+                                                <button
+                                                    onClick={() => setImportMode('append')}
+                                                    className={`w-full p-4 rounded-sm border-2 font-bold text-sm transition-all text-left ${importMode === 'append'
+                                                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
+                                                        : 'border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300'
+                                                        }`}
+                                                >
+                                                    <div className="font-black mb-1">추가하기</div>
+                                                    <div className="text-xs opacity-70">기존 서재 뒤에 불러온 파일을 추가합니다</div>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="p-6 border-t border-slate-200 dark:border-zinc-700 shrink-0">
+                        {mode === 'save' ? (
+                            <button
+                                onClick={handleSave}
+                                className="w-full py-4 bg-slate-900 hover:bg-indigo-600 text-white font-black text-sm rounded-sm shadow-md transition-colors dark:bg-indigo-600 dark:hover:bg-indigo-500"
+                            >
+                                저장하기
+                            </button>
+                        ) : (
+                            importStep === 'mode' && (
+                                <button
+                                    onClick={handleImport}
+                                    className="w-full py-4 bg-slate-900 hover:bg-indigo-600 text-white font-black text-sm rounded-sm shadow-md transition-colors dark:bg-indigo-600 dark:hover:bg-indigo-500"
+                                >
+                                    불러오기
+                                </button>
+                            )
+                        )}
+                    </div>
+                </motion.div>
+            );
+        };
+
+        // Workspace
+        const IconHistory = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 3v5h5" /><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" /><path d="M12 7v5l4 2" /></svg>);
+
+
+        // HistoryManager Modal
+        const HistoryManager = ({ doc, onClose, onRestore, onSnapshot, onDelete }) => {
+            const [selectedSnapshot, setSelectedSnapshot] = useState(null);
+            const [isInputOpen, setIsInputOpen] = useState(false);
+            const [deleteTargetId, setDeleteTargetId] = useState(null); // 삭제 대상 ID 상태 추가
+            const [memoInput, setMemoInput] = useState('');
+            const history = doc.history || [];
+
+            const handleSnapshot = () => {
+                onSnapshot(memoInput);
+                setIsInputOpen(false);
+                setMemoInput('');
+            };
+
+            const handleDeleteConfirm = () => {
+                if (deleteTargetId) {
+                    onDelete(deleteTargetId);
+                    if (selectedSnapshot?.id === deleteTargetId) setSelectedSnapshot(null);
+                    setDeleteTargetId(null);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose}></div>
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-white dark:bg-darkpanel w-[710px] h-[450px] rounded-xl shadow-2xl flex flex-col overflow-hidden relative z-10 border border-slate-200 dark:border-zinc-700"
+                    >
+                        {/* 메모 입력 모달 */}
+                        <AnimatePresence>
+                            {isInputOpen && (
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[2px]"
+                                    onClick={() => setIsInputOpen(false)}
+                                >
+                                    <motion.div
+                                        initial={{ scale: 0.9, opacity: 0 }}
+                                        animate={{ scale: 1, opacity: 1 }}
+                                        exit={{ scale: 0.9, opacity: 0 }}
+                                        className="bg-white dark:bg-zinc-800 p-5 rounded-lg shadow-2xl border border-slate-200 dark:border-zinc-700 w-80"
+                                        onClick={e => e.stopPropagation()}
+                                    >
+                                        <h3 className="text-sm font-black text-slate-800 dark:text-zinc-100 mb-3">스냅샷 메모</h3>
+                                        <input
+                                            autoFocus
+                                            type="text"
+                                            className="w-full p-3 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded text-sm font-medium mb-4 outline-none focus:border-indigo-500 dark:text-zinc-200"
+                                            placeholder="메모를 입력하세요 (선택)"
+                                            value={memoInput}
+                                            onChange={e => setMemoInput(e.target.value)}
+                                            onKeyDown={e => {
+                                                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                                    e.preventDefault();
+                                                    handleSnapshot();
+                                                }
+                                            }}
+                                        />
+                                        <div className="flex gap-2">
+                                            <button onClick={() => setIsInputOpen(false)} className="flex-1 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-700 rounded">취소</button>
+                                            <button onClick={handleSnapshot} className="flex-1 py-2 text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 rounded shadow-sm">저장하기</button>
+                                        </div>
+                                    </motion.div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        {/* 삭제 확인 모달 */}
+                        <AnimatePresence>
+                            {deleteTargetId && (
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[2px]"
+                                    onClick={() => setDeleteTargetId(null)}
+                                >
+                                    <motion.div
+                                        initial={{ scale: 0.9, opacity: 0 }}
+                                        animate={{ scale: 1, opacity: 1 }}
+                                        exit={{ scale: 0.9, opacity: 0 }}
+                                        className="bg-white dark:bg-zinc-800 p-5 rounded-lg shadow-2xl border border-red-200 dark:border-red-900 w-72"
+                                        onClick={e => e.stopPropagation()}
+                                    >
+                                        <div className="flex flex-col items-center text-center mb-4">
+                                            <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mb-3 text-red-500">
+                                                <IconTrash className="w-5 h-5" />
+                                            </div>
+                                            <h3 className="text-sm font-black text-slate-800 dark:text-zinc-100 mb-1">기록 삭제</h3>
+                                            <p className="text-xs text-slate-500 dark:text-zinc-400">정말로 이 기록을 삭제하시겠습니까?<br/>삭제된 기록은 복구할 수 없습니다.</p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => setDeleteTargetId(null)} className="flex-1 py-2 text-xs font-bold text-slate-500 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-zinc-700 rounded">취소</button>
+                                            <button onClick={handleDeleteConfirm} className="flex-1 py-2 text-xs font-bold bg-red-600 text-white hover:bg-red-700 rounded shadow-sm">삭제하기</button>
+                                        </div>
+                                    </motion.div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        <div className="p-5 border-b border-slate-100 dark:border-zinc-700 flex justify-between items-center bg-slate-50/50 dark:bg-zinc-800/50">
+                            <div>
+                                <h2 className="text-lg font-black text-slate-800 dark:text-zinc-100 flex items-center gap-2">
+                                    <IconHistory className="w-5 h-5 text-indigo-500" />
+                                    문서 히스토리
+                                </h2>
+                                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
+                                    스냅샷을 생성하거나 이전 버전으로 복원할 수 있습니다. (최대 20개 저장)
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => { setMemoInput(''); setIsInputOpen(true); }}
+                                    className="px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-400 dark:hover:bg-indigo-900/50 rounded text-xs font-bold transition-colors flex items-center gap-1"
+                                >
+                                    <IconPlus className="w-3 h-3" />
+                                    현재 상태 스냅샷
+                                </button>
+                                <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded transition-colors">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-1 overflow-hidden">
+                            {/* 미리보기 및 복원 (왼쪽) */}
+                            <div className="flex-1 flex flex-col bg-white dark:bg-darkpanel">
+                                {selectedSnapshot ? (
+                                    <>
+                                        <div className="p-3 border-b border-slate-100 dark:border-zinc-700 flex justify-between items-center bg-slate-50/30 dark:bg-zinc-800/20">
+                                            <span className="text-xs font-bold text-slate-500">
+                                                {new Date(selectedSnapshot.timestamp).toLocaleString()} 버전 미리보기
+                                            </span>
+                                            <button
+                                                onClick={() => {
+                                                    if (confirm("현재 내용을 이 버전으로 되돌리시겠습니까?")) {
+                                                        onRestore(selectedSnapshot);
+                                                        onClose();
+                                                    }
+                                                }}
+                                                className="px-4 py-1.5 bg-slate-800 hover:bg-indigo-600 text-white text-xs font-bold rounded shadow-lg shadow-indigo-500/10 transition-all flex items-center gap-2"
+                                            >
+                                                <IconHistory className="w-3 h-3" />
+                                                이 버전으로 복원하기
+                                            </button>
+                                        </div>
+                                        <textarea
+                                            readOnly
+                                            className="flex-1 w-full p-8 resize-none outline-none text-slate-600 dark:text-zinc-300 leading-loose custom-scroll bg-transparent"
+                                            value={selectedSnapshot.content}
+                                            style={{ fontSize: '15px' }}
+                                        />
+                                    </>
+                                ) : (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-slate-300 dark:text-zinc-600 gap-3">
+                                        <IconHistory className="w-12 h-12 opacity-50" />
+                                        <span className="text-sm">오른쪽 목록에서 버전을 선택하여 내용을 확인하세요</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* 히스토리 목록 (오른쪽) */}
+                            <div className="w-64 border-l border-slate-100 dark:border-zinc-700 overflow-y-auto custom-scroll bg-slate-50/30 dark:bg-zinc-900/30">
+                                {history.length === 0 ? (
+                                    <div className="p-8 text-center text-slate-400 text-xs">
+                                        저장된 히스토리가 없습니다.
+                                    </div>
+                                ) : (
+                                    <div className="p-2 space-y-1">
+                                        {[...history].reverse().map((snap) => (
+                                            <div
+                                                key={snap.id}
+                                                onClick={() => setSelectedSnapshot(snap)}
+                                                className={`group relative p-3 rounded-[3px] cursor-pointer transition-all border ${selectedSnapshot?.id === snap.id ? 'bg-white dark:bg-zinc-800 border-indigo-200 dark:border-indigo-900 shadow-sm' : 'border-transparent hover:bg-white dark:hover:bg-zinc-800 hover:shadow-sm'}`}
+                                            >
+                                                <div className="flex items-center mb-1.5">
+                                                    <span className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-700 px-1.5 py-0.5 rounded">
+                                                        {new Date(snap.timestamp).toLocaleString([], { year: '2-digit', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                    </span>
+                                                </div>
+                                                <div className="text-xs font-medium text-slate-700 dark:text-zinc-300 line-clamp-2 leading-relaxed mb-1.5">
+                                                    {snap.summary || "내용 없음"}
+                                                </div>
+                                                <div className="text-[9px] text-slate-400 text-right font-medium">
+                                                    {snap.content.length.toLocaleString()}자
+                                                </div>
+                                                
+                                                {/* 삭제 버튼 (호버 시 표시) */}
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setDeleteTargetId(snap.id);
+                                                    }}
+                                                    className="absolute top-2 right-2 p-1.5 text-slate-400 hover:text-red-500 rounded shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                                                    title="기록 삭제"
+                                                >
+                                                    <IconTrash className="w-3 h-3" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </motion.div>
+                </div>
+            );
+        };
+
+        const Workspace = ({ currentBook, user, onLogin, onLogout, onUpdateBook, onExit, showToast, isDarkMode, toggleDarkMode, fontMode, toggleFont, setFontMode, focusPosition, setFocusPosition, defaultTargetCount, setDefaultTargetCount, editorWidth, setEditorWidth, editorFontSize, setEditorFontSize, showDocWordCount, setShowDocWordCount, enableHistory, setEnableHistory, cloudAutoSaveInterval, setCloudAutoSaveInterval, nickname, setNickname }) => {
+            const [projects, setProjects] = useState(currentBook.projects || []);
+            const [trash, setTrash] = useState(currentBook.trash || []); // 휴지통
+            const [isTrashOpen, setIsTrashOpen] = useState(false); // 휴지통 열림 상태
+            const [activeProjectId, setActiveProjectId] = useState(() => {
+                const saved = localStorage.getItem(`sagak_last_proj_${currentBook.id}`);
+                return saved || (currentBook.activeProjectId || (currentBook.projects[0] ? currentBook.projects[0].id : 'default'));
+            });
+            const [expandedProjects, setExpandedProjects] = useState(currentBook.expandedProjects || (currentBook.projects[0] ? { [currentBook.projects[0].id]: true } : {}));
+            const [scale, setScale] = useState(currentBook.scale || 1);
+            const [pan, setPan] = useState(currentBook.pan || { x: 0, y: 0 });
+            const panAnimationRef = useRef(null);
+            const [isZenMode, setIsZenMode] = useState(false);
+            const [isPomodoroOpen, setIsPomodoroOpen] = useState(false);
+            const [showSystemSettings, setShowSystemSettings] = useState(false);
+            const [showHistoryModal, setShowHistoryModal] = useState(false);
+            const [showSynopsisModal, setShowSynopsisModal] = useState(false);
+            const [openStatusDropdownId, setOpenStatusDropdownId] = useState(null);
+            const [corkboardMode, setCorkboardMode] = useState(() => {
+                const saved = localStorage.getItem(`sagak_last_mode_${currentBook.id}`);
+                return saved === 'true';
+            });
+
+            // 프로젝트 및 모드 상태 저장
+            useEffect(() => {
+                localStorage.setItem(`sagak_last_proj_${currentBook.id}`, activeProjectId);
+                localStorage.setItem(`sagak_last_mode_${currentBook.id}`, corkboardMode);
+            }, [activeProjectId, corkboardMode, currentBook.id]);
+            const [corkboardSearch, setCorkboardSearch] = useState('');
+            const [corkboardStatusFilter, setCorkboardStatusFilter] = useState(null);
+            const [isCorkboardFilterOpen, setIsCorkboardFilterOpen] = useState(false);
+
+            const [mention, setMention] = useState({ active: false, type: null, search: '', x: 0, y: 0, pos: 0, selectedIndex: 0 });
+            const [showNodeDropdown, setShowNodeDropdown] = useState(false);
+            const [compareMode, setCompareMode] = useState(false);
+            const [compareDocIds, setCompareDocIds] = useState([null, null]);
+            const [activeComparePane, setActiveComparePane] = useState(0);
+            const [editingProjectId, setEditingProjectId] = useState(null);
+            const [corkboardEditingId, setCorkboardEditingId] = useState(null);
+            const textareaRef = useRef(null);
+            const [pomoMinutes, setPomoMinutes] = useState(25);
+            const [pomoSeconds, setPomoSeconds] = useState(0);
+            const [isPomoActive, setIsPomoActive] = useState(false);
+            const [pomoInitialTotal, setPomoInitialTotal] = useState(25 * 60);
+            const [pomoRemaining, setPomoRemaining] = useState(25 * 60);
+            const [isPomoSetting, setIsPomoSetting] = useState(false);
+            const [isNameGenOpen, setIsNameGenOpen] = useState(false);
+            const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
+            const [nameGenSettings, setNameGenSettings] = useState(null);
+
+            // 화면 크기에 따른 초기 모드 설정
+            useEffect(() => {
+                const handleResize = () => {
+                    const isLarge = window.innerWidth > 1024;
+                    if (isLarge) {
+                        setIsSidebarOpen(true);
+                    } else {
+                        // 태블릿/모바일에서는 보드일 경우 코르크보드로 강제 전환
+                        const currentProject = projects.find(p => p.id === activeProjectId);
+                        if (currentProject && currentProject.type === 'board') {
+                            setCorkboardMode(true);
+                        }
+                    }
+                };
+
+                // 초기 실행
+                if (window.innerWidth <= 1024) {
+                    const currentProject = projects.find(p => p.id === activeProjectId);
+                    if (currentProject && currentProject.type === 'board') {
+                        setCorkboardMode(true);
+                    }
+                }
+
+                window.addEventListener('resize', handleResize);
+                return () => window.removeEventListener('resize', handleResize);
+            }, [activeProjectId, projects]);
+            const [todoInput, setTodoInput] = useState('');
+            const [docFilter, setDocFilter] = useState(null);
+            const [isEditingTitle, setIsEditingTitle] = useState(false);
+            const titleInputRef = useRef(null);
+            const isDraggingSplitter = useRef(false);
+            const [isSplitterDragging, setIsSplitterDragging] = useState(false);
+            const [splitRatio, setSplitRatio] = useState(50);
+            const containerRef = useRef(null);
+            const nodeDropdownRef = useRef(null);
+            const compareTextareaRefs = useRef([null, null]);
+
+            // === 맞춤법 검사기 통합 상태 ===
+            const [isSpellChecking, setIsSpellChecking] = useState(false);
+            const [spellInspectDocId, setSpellInspectDocId] = useState(null);
+            const [spellTokens, setSpellTokens] = useState([]);
+            const [spellErrors, setSpellErrors] = useState([]);
+            const [spellCurrentErrorIdx, setSpellCurrentErrorIdx] = useState(0);
+            const [spellManualInput, setSpellManualInput] = useState('');
+            const [spellPopoverPos, setSpellPopoverPos] = useState(null);
+            const spellInspectionRef = useRef(null);
+
+            const startSpellCheck = async (doc) => {
+                const text = (doc.content || '').trim();
+                if (!text) {
+                    showToast('검사할 본문 내용이 없습니다.', 'error');
+                    return;
+                }
+                setIsSpellChecking(true);
+                try {
+                    const res = await fetch('/api/check', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: doc.content || '' })
+                    });
+                    const data = await res.json();
+                    if (!data.errors || data.errors.length === 0) {
+                        showToast(data.warning || '맞춤법 오류가 없습니다! 완벽합니다. ✨', data.warning ? 'error' : 'success');
+                        setIsSpellChecking(false);
+                        return;
+                    }
+                    setSpellTokens(data.tokens || []);
+                    setSpellErrors(data.errors || []);
+                    setSpellInspectDocId(doc.id);
+                    setSpellCurrentErrorIdx(0);
+                    setSpellManualInput(data.errors[0]?.suggestion || '');
+                    showToast(`맞춤법 오류 ${data.errors.length}건이 발견되었습니다.`, 'info');
+                    
+                    setTimeout(() => {
+                        positionSpellPopover(0);
+                    }, 50);
+                } catch (err) {
+                    console.error('Spell check error:', err);
+                    showToast('맞춤법 서버(8080) 연결에 실패했습니다.', 'error');
+                    setIsSpellChecking(false);
+                }
+            };
+
+            const positionSpellPopover = (idx) => {
+                const span = document.getElementById(`summer-spell-span-${idx}`);
+                const container = spellInspectionRef.current;
+                if (!span || !container) {
+                    setSpellPopoverPos(null);
+                    return;
+                }
+                const cRect = container.getBoundingClientRect();
+                const sRect = span.getBoundingClientRect();
+                const popWidth = 320;
+                const popHeight = 220;
+
+                let top = (sRect.bottom - cRect.top) + container.scrollTop + 8;
+                let left = (sRect.left - cRect.left) + container.scrollLeft;
+
+                if (left + popWidth > container.clientWidth - 16) {
+                    left = Math.max(16, container.clientWidth - popWidth - 16);
+                }
+
+                // If popover goes off bottom, place it above the word
+                if (sRect.bottom + popHeight > cRect.bottom) {
+                    top = (sRect.top - cRect.top) + container.scrollTop - popHeight - 8;
+                }
+
+                setSpellPopoverPos({ top: Math.max(10, top), left: Math.max(10, left) });
+                span.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            };
+
+            const applySpellCorrection = (newText) => {
+                const targetIdx = spellCurrentErrorIdx;
+                
+                const nextErrors = spellErrors.map((err, idx) => 
+                    idx === targetIdx ? { ...err, is_fixed: true, is_passed: false, applied_text: newText } : err
+                );
+                setSpellErrors(nextErrors);
+
+                // 프로젝트 본문 업데이트: 원본 토큰 기반 + 교정된 에러는 applied_text로 치환
+                let finalStr = '';
+                spellTokens.forEach(token => {
+                    if (token.is_err && token.err_id !== null) {
+                        const errObj = nextErrors[token.err_id];
+                        if (errObj && errObj.is_fixed) {
+                            finalStr += errObj.applied_text;
+                        } else {
+                            finalStr += token.text;
+                        }
+                    } else {
+                        finalStr += token.text;
+                    }
+                });
+                setProjects(prev => prev.map(p => p.id === spellInspectDocId ? { ...p, content: finalStr } : p));
+
+                advanceSpell(nextErrors);
+            };
+
+            const passSpellCurrent = () => {
+                const targetIdx = spellCurrentErrorIdx;
+                const nextErrors = spellErrors.map((err, idx) => 
+                    idx === targetIdx ? { ...err, is_passed: true, is_fixed: false } : err
+                );
+                setSpellErrors(nextErrors);
+                advanceSpell(nextErrors);
+            };
+
+            const advanceSpell = (errors) => {
+                let nextIdx = spellCurrentErrorIdx + 1;
+                while (nextIdx < errors.length && (errors[nextIdx].is_fixed || errors[nextIdx].is_passed)) {
+                    nextIdx++;
+                }
+                if (nextIdx < errors.length) {
+                    setSpellCurrentErrorIdx(nextIdx);
+                    setSpellManualInput(errors[nextIdx].suggestion || '');
+                    setTimeout(() => positionSpellPopover(nextIdx), 50);
+                } else {
+                    const remIdx = errors.findIndex(e => !e.is_fixed && !e.is_passed);
+                    if (remIdx !== -1) {
+                        setSpellCurrentErrorIdx(remIdx);
+                        setSpellManualInput(errors[remIdx].suggestion || '');
+                        setTimeout(() => positionSpellPopover(remIdx), 50);
+                    } else {
+                        setSpellPopoverPos(null);
+                        showToast('모든 맞춤법 교정이 완료되었습니다! 🎉', 'success');
+                        setTimeout(() => exitSpellInspection(), 1500);
+                    }
+                }
+            };
+
+            const exitSpellInspection = () => {
+                setSpellInspectDocId(null);
+                setSpellTokens([]);
+                setSpellErrors([]);
+                setSpellPopoverPos(null);
+                setIsSpellChecking(false);
+            };
+
+            const renderStatusSelector = (doc) => {
+                const isOpen = openStatusDropdownId === doc.id;
+                const currentStatus = doc.status || '초고';
+                
+                const dotColor = currentStatus === '완료' ? 'bg-emerald-500' : currentStatus === '수정' ? 'bg-amber-500' : 'bg-indigo-500';
+                const textColor = currentStatus === '완료' ? 'text-emerald-700 dark:text-emerald-300' : currentStatus === '수정' ? 'text-amber-700 dark:text-amber-300' : 'text-indigo-700 dark:text-indigo-300';
+
+                return (
+                    <div 
+                        className="relative z-50 flex items-center gap-1" 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenStatusDropdownId(isOpen ? null : doc.id);
+                        }}
+                    >
+                        {!isOpen ? (
+                            <button 
+                                className={`status-badge-capsule ${textColor}`}
+                                title="문서 진행 상태 변경"
+                            >
+                                <span className={`w-2 h-2 rounded-full ${dotColor} animate-pulse`}></span>
+                                <span className="font-extrabold">{currentStatus}</span>
+                                {/* 오른쪽 방향 화살표 */}
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 text-slate-400 dark:text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="9 18 15 12 9 6"></polyline>
+                                </svg>
+                            </button>
+                        ) : (
+                            <div className="flex items-center gap-1 bg-white dark:bg-[#18181b] p-1 h-[28px] rounded-md border border-slate-200 dark:border-zinc-700 shadow-md">
+                                {['초고', '수정', '완료'].map(status => {
+                                    const isActive = currentStatus === status;
+                                    const statusDot = status === '완료' ? 'bg-emerald-500' : status === '수정' ? 'bg-amber-500' : 'bg-indigo-500';
+                                    return (
+                                        <button
+                                            key={status}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setProjects(prev => prev.map(p => p.id === doc.id ? { ...p, status } : p));
+                                                setOpenStatusDropdownId(null);
+                                            }}
+                                            className={`px-2 h-full text-[10.5px] font-bold rounded flex items-center gap-1.5 transition-all ${
+                                                isActive
+                                                ? 'bg-slate-100 dark:bg-zinc-700 text-slate-900 dark:text-zinc-100 shadow-xs font-black'
+                                                : 'text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-slate-50 dark:hover:bg-zinc-700/50'
+                                            }`}
+                                        >
+                                            <span className={`w-1.5 h-1.5 rounded-full ${statusDot}`}></span>
+                                            <span>{status}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                );
+            };
+
+            const scrollTargetRef = useRef(0);
+            const scrollAnimRef = useRef(null);
+            const scrollLockRef = useRef(false);
+            const getCaretCoordinates = (element, position) => {
+                const div = document.createElement('div');
+                const style = window.getComputedStyle(element);
+                const props = ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'padding', 'border', 'width', 'boxSizing', 'whiteSpace', 'wordWrap'];
+                props.forEach(prop => div.style[prop] = style[prop]);
+                div.style.position = 'absolute';
+                div.style.visibility = 'hidden';
+                div.textContent = element.value.substring(0, position);
+                const span = document.createElement('span');
+                span.textContent = element.value.substring(position) || '.';
+                div.appendChild(span);
+                document.body.appendChild(div);
+                const rect = element.getBoundingClientRect();
+                const coordinates = { top: rect.top + span.offsetTop + element.scrollTop, left: rect.left + span.offsetLeft };
+                document.body.removeChild(div);
+                return coordinates;
+            };
+
+            const updateFocusScroll = useCallback(() => {
+                if (!isZenMode || scrollLockRef.current) return;
+
+                const textarea = compareMode
+                    ? compareTextareaRefs.current[activeComparePane]
+                    : textareaRef.current;
+
+                if (!textarea) return;
+
+                const coords = getCaretCoordinates(textarea, textarea.selectionStart);
+                const rect = textarea.getBoundingClientRect();
+                const contentOffsetTop = coords.top - rect.top - textarea.scrollTop;
+                const targetScroll = contentOffsetTop - (textarea.clientHeight * focusPosition);
+
+                const currentDiff = Math.abs(targetScroll - scrollTargetRef.current);
+                if (currentDiff > 30) {
+                    scrollTargetRef.current = targetScroll;
+                }
+            }, [isZenMode, compareMode, activeComparePane, focusPosition]);
+
+            useEffect(() => {
+                if (!isZenMode) {
+                    if (scrollAnimRef.current) cancelAnimationFrame(scrollAnimRef.current);
+                    return;
+                }
+
+                // Zen 모드 진입 시 현재 스크롤 위치로 초기화
+                const textarea = compareMode
+                    ? compareTextareaRefs.current[activeComparePane]
+                    : textareaRef.current;
+                if (textarea) {
+                    scrollTargetRef.current = textarea.scrollTop;
+                }
+
+                // 약간의 딜레이 후 목표 위치 계산
+                setTimeout(() => {
+                    updateFocusScroll();
+                }, 100);
+
+                const loop = () => {
+                    const textarea = compareMode
+                        ? compareTextareaRefs.current[activeComparePane]
+                        : textareaRef.current;
+
+                    if (textarea && !scrollLockRef.current) {
+                        const current = textarea.scrollTop;
+                        const target = scrollTargetRef.current;
+                        const diff = target - current;
+
+                        if (Math.abs(diff) > 3) {
+                            textarea.scrollTop = current + diff * 0.12;
+                        }
+                    }
+                    scrollAnimRef.current = requestAnimationFrame(loop);
+                };
+
+                loop();
+                return () => cancelAnimationFrame(scrollAnimRef.current);
+            }, [isZenMode, updateFocusScroll, compareMode, activeComparePane]);
+
+            const animateViewport = useCallback((targetPan, targetScale) => {
+                if (panAnimationRef.current) cancelAnimationFrame(panAnimationRef.current);
+                
+                const startPan = { ...pan };
+                const startScale = scale;
+                const startTime = performance.now();
+                const duration = 500;
+
+                const animate = (currentTime) => {
+                    const elapsed = currentTime - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    const ease = t => t < .5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+                    
+                    const t = ease(progress);
+                    
+                    setPan({
+                        x: startPan.x + (targetPan.x - startPan.x) * t,
+                        y: startPan.y + (targetPan.y - startPan.y) * t
+                    });
+                    
+                    if (targetScale !== undefined) {
+                        setScale(startScale + (targetScale - startScale) * t);
+                    }
+
+                    if (progress < 1) {
+                        panAnimationRef.current = requestAnimationFrame(animate);
+                    }
+                };
+                
+                panAnimationRef.current = requestAnimationFrame(animate);
+            }, [pan, scale]);
+
+            useEffect(() => {
+                let interval = null;
+                if (isPomoActive && pomoRemaining > 0) {
+                    interval = setInterval(() => {
+                        setPomoRemaining(prev => {
+                            if (prev <= 1) {
+                                setIsPomoActive(false);
+                                showToast("뽀모도로 타이머가 종료되었습니다! ☕", "success");
+                                return 0;
+                            }
+                            return prev - 1;
+                        });
+                    }, 1000);
+                } else if (pomoRemaining === 0) {
+                    setIsPomoActive(false);
+                }
+                return () => clearInterval(interval);
+            }, [isPomoActive, pomoRemaining, showToast]);
+
+            // 히스토리 관리 함수들
+            const createSnapshot = useCallback((docId, memo) => {
+                setProjects(prev => prev.map(p => {
+                    if (p.id !== docId) return p;
+                    const newHistory = [
+                        ...(p.history || []),
+                        {
+                            id: generateUUID(),
+                            timestamp: Date.now(),
+                            content: p.content || "",
+                            summary: memo || ((p.content || "").slice(0, 50) + ((p.content || "").length > 50 ? "..." : ""))
+                        }
+                    ];
+                    // 최대 20개 유지
+                    if (newHistory.length > 20) newHistory.shift();
+                    return { ...p, history: newHistory };
+                }));
+                showToast("스냅샷이 저장되었습니다.");
+            }, [showToast]);
+
+            const restoreSnapshot = useCallback((snapshot) => {
+                setProjects(prev => prev.map(p => {
+                    if (p.id !== activeProjectId) return p;
+
+                    // 복원 전 현재 상태도 자동 스냅샷 (실수 방지)
+                    const currentHistory = p.history || [];
+                    const autoSnapshot = {
+                        id: generateUUID(),
+                        timestamp: Date.now(),
+                        content: p.content || "",
+                        summary: "복원 전 자동 저장: " + ((p.content || "").slice(0, 30) || "내용 없음")
+                    };
+                    const newHistory = [...currentHistory, autoSnapshot];
+                    if (newHistory.length > 20) newHistory.shift();
+
+                    return { ...p, content: snapshot.content, history: newHistory };
+                }));
+                showToast("선택한 버전으로 복원되었습니다.");
+            }, [activeProjectId, showToast]);
+
+            const deleteSnapshot = useCallback((snapshotId) => {
+                setProjects(prev => prev.map(p => {
+                    if (p.id !== activeProjectId) return p;
+                    const newHistory = (p.history || []).filter(h => h.id !== snapshotId);
+                    return { ...p, history: newHistory };
+                }));
+                showToast("기록이 삭제되었습니다.");
+            }, [activeProjectId, showToast]);
+
+
+            const setSidebarCols = (projectId, cols) => {
+                setProjects(prev => prev.map(p =>
+                    p.id === projectId ? { ...p, sidebarColumns: cols } : p
+                ));
+            };
+
+            useEffect(() => {
+                const handleClickOutside = (e) => {
+                    if (!mention.active) return;
+                    const mentionList = document.querySelector('.mention-list');
+                    const isTextAreaClick = e.target === textareaRef.current;
+                    if (mentionList && !mentionList.contains(e.target) && !isTextAreaClick) {
+                        setMention(prev => ({ ...prev, active: false }));
+                    }
+                };
+                if (mention.active) {
+                    document.addEventListener('mousedown', handleClickOutside);
+                }
+                return () => document.removeEventListener('mousedown', handleClickOutside);
+            }, [mention.active]);
+
+            useEffect(() => {
+                const handleDropdownClickOutside = (e) => {
+                    if (showNodeDropdown && !e.target.closest('.relative')) {
+                        setShowNodeDropdown(false);
+                    }
+                    if (openStatusDropdownId && !e.target.closest('.relative.z-50')) {
+                        setOpenStatusDropdownId(null);
+                    }
+                };
+                if (showNodeDropdown || openStatusDropdownId) {
+                    document.addEventListener('mousedown', handleDropdownClickOutside);
+                }
+                return () => document.removeEventListener('mousedown', handleDropdownClickOutside);
+            }, [showNodeDropdown, openStatusDropdownId]);
+
+            // Auto-save to parent component
+            useEffect(() => {
+                onUpdateBook({
+                    ...currentBook,
+                    projects,
+                    trash,
+                    activeProjectId,
+                    expandedProjects,
+                    scale,
+                    pan
+                });
+            }, [projects, trash, activeProjectId, expandedProjects, scale, pan]);
+
+            const activeProject = useMemo(() => projects.find(p => p.id === activeProjectId) || projects[0], [projects, activeProjectId]);
+
+            const docContent = activeProject?.type === 'doc' ? (activeProject.content || "") : "";
+            const docStats = useMemo(() => {
+                const totalLen = docContent.length;
+                if (totalLen === 0) return { totalLen: 0, noSpaceLen: 0, achievement: 0 };
+                let noSpaceLen = 0;
+                for (let i = 0; i < totalLen; i++) {
+                    const code = docContent.charCodeAt(i);
+                    if (code > 32 && code !== 12288) noSpaceLen++;
+                }
+                const achievement = Math.min(Math.round((totalLen / defaultTargetCount) * 100), 100);
+                return { totalLen, noSpaceLen, achievement };
+            }, [docContent, defaultTargetCount]);
+
+            const nodes = activeProject?.nodes || [];
+            
+            const fitToScreen = useCallback((nodesToFit = nodes) => {
+                if (!nodesToFit || nodesToFit.length === 0) return;
+                
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                nodesToFit.forEach(node => {
+                    const w = node.type === '그룹' ? (node.data.width || 400) : CARD_W;
+                    let h = CARD_H;
+                    if (node.type === '그룹') {
+                        h = node.data.height || 300;
+                    } else if (node.type === '할일') {
+                        // 할일 노드는 높이가 가변적이므로, 항목 수에 따라 대략적으로 계산하거나 넉넉하게 잡음
+                        // 기본 헤더 + 패딩(60px) + 항목당 높이(24px) + 입력창(30px) + 여유분
+                        const itemsHeight = (node.data.items || []).length * 24 + 100; 
+                        h = Math.max(CARD_H, itemsHeight);
+                    }
+
+                    minX = Math.min(minX, node.x);
+                    maxX = Math.max(maxX, node.x + w);
+                    minY = Math.min(minY, node.y);
+                    maxY = Math.max(maxY, node.y + h);
+                });
+
+                const contentW = maxX - minX;
+                const contentH = maxY - minY;
+                
+                const containerEl = containerRef.current;
+                const containerW = containerEl ? containerEl.clientWidth : window.innerWidth;
+                const containerH = containerEl ? containerEl.clientHeight : window.innerHeight;
+                
+                const padding = 100;
+                const scaleX = (containerW - padding * 2) / contentW;
+                const scaleY = (containerH - padding * 2) / contentH;
+                
+                // Use Math.min(scaleX, scaleY) to ensure both dimensions fit.
+                // Clamp the result between 0.05 (to allow zooming out for huge boards) and 1.5.
+                const newScale = Math.min(Math.max(Math.min(scaleX, scaleY), 0.05), 1.5);
+
+                const centerX = minX + contentW / 2;
+                const centerY = minY + contentH / 2;
+                
+                const targetPan = {
+                    x: containerW / 2 - centerX * newScale,
+                    y: containerH / 2 - centerY * newScale
+                };
+                
+                animateViewport(targetPan, newScale);
+            }, [nodes, animateViewport]);
+
+            const edges = activeProject?.edges || [];
+            const allBoardNodes = useMemo(() => projects.filter(p => p.type === 'board').flatMap(p => (p.nodes || []).map(node => ({ ...node, projectName: p.name, projectId: p.id }))), [projects]);
+            const filteredMentionNodes = useMemo(() => { 
+                if (!mention.active) return []; 
+                return allBoardNodes.filter(n => {
+                    const targetType = mention.type === '@' ? '인물' : mention.type === '#' ? '사건' : mention.type === '$' ? '메모' : mention.type === '%' ? '할일' : '메모';
+                    return n.type === targetType && (n.label.includes(mention.search) || mention.search === "");
+                }); 
+            }, [allBoardNodes, mention]);
+
+            const handleToggleTodoInMention = (projectId, nodeId, itemId) => {
+                setProjects(prev => prev.map(p => {
+                    if (p.id !== projectId) return p;
+                    return {
+                        ...p,
+                        nodes: p.nodes.map(n => {
+                            if (n.id !== nodeId) return n;
+                            const newItems = (n.data.items || []).map(item => 
+                                item.id === itemId ? { ...item, done: !item.done } : item
+                            );
+                            return { ...n, data: { ...n.data, items: newItems } };
+                        })
+                    };
+                }));
+            };
+
+            const handleSelectProject = (id, e) => {
+                const target = projects.find(p => p.id === id);
+
+                // Shift+클릭으로 문서 비교 모드 활성화 (doc 타입만)
+                if (e && e.shiftKey && target && target.type === 'doc') {
+                    if (!compareMode) {
+                        // 현재 활성 문서가 doc이면 비교 모드 시작
+                        const currentDoc = projects.find(p => p.id === activeProjectId);
+                        if (currentDoc && currentDoc.type === 'doc' && activeProjectId !== id) {
+                            setCompareMode(true);
+                            setCompareDocIds([activeProjectId, id]);
+                            setActiveComparePane(1);
+                            return;
+                        } else if (!currentDoc || currentDoc.type !== 'doc') {
+                            // 현재가 doc이 아니면 선택한 문서를 왼쪽에 배치하고 다음 선택 대기
+                            setActiveProjectId(id);
+                            return;
+                        }
+                    } else {
+                        // 이미 비교 모드 중이면 활성 패널의 문서 교체
+                        setCompareDocIds(prev => {
+                            const newIds = [...prev];
+                            newIds[activeComparePane] = id;
+                            return newIds;
+                        });
+                        showToast("문서가 교체되었습니다");
+                        return;
+                    }
+                }
+
+                // 비교 모드 종료 (일반 클릭 시)
+                if (compareMode) {
+                    setCompareMode(false);
+                    setCompareDocIds([null, null]);
+                    setIsZenMode(false);
+                }
+
+                setActiveProjectId(id);
+                // 다른 문서로 전환 시 맞춤법 검사 중지
+                if (spellInspectDocId && spellInspectDocId !== id) {
+                    exitSpellInspection();
+                }
+                if (target && target.type !== 'doc') {
+                    setIsZenMode(false);
+                    // 모바일/태블릿에서 보드 선택 시 자동으로 코르크 보드 모드로 전환
+                    if (window.innerWidth <= 1024 && target.type === 'board') {
+                        setCorkboardMode(true);
+                    } else {
+                        setCorkboardMode(false);
+                    }
+                } else {
+                    setCorkboardMode(false);
+                }
+                
+                setIsTrashOpen(false);
+                // 프로젝트 전환 시 선택 상태 및 임시 상태 초기화 (메모리 관리)
+                setSelectedNodeIds(new Set());
+                setSelectedNodeId(null);
+                setSelectedEdgeId(null);
+                setTempEdge(null);
+            };
+
+            // 비교 모드 키보드 단축키 (ESC: 종료, Tab: 패널 전환)
+            useEffect(() => {
+                if (!compareMode) return;
+                const handleCompareKeydown = (e) => {
+                    if (e.key === 'Escape') {
+                        setCompareMode(false);
+                        setCompareDocIds([null, null]);
+                        setIsZenMode(false);
+                        showToast("비교 모드 종료");
+                    } else if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                        e.preventDefault();
+                        setCompareDocIds(prev => [prev[1], prev[0]]);
+                    }
+                };
+                window.addEventListener('keydown', handleCompareKeydown);
+                return () => window.removeEventListener('keydown', handleCompareKeydown);
+            }, [compareMode, activeComparePane]);
+            const toggleProjectFolder = (id, e) => { if (e) e.stopPropagation(); setExpandedProjects(prev => ({ ...prev, [id]: !prev[id] })); };
+
+            const updateActiveProject = useCallback((nodeUpdater, edgeUpdater) => {
+                setProjects(prev => prev.map(p => {
+                    if (p.id !== activeProjectId) return p;
+                    return {
+                        ...p,
+                        nodes: nodeUpdater ? (typeof nodeUpdater === 'function' ? nodeUpdater(p.nodes || []) : nodeUpdater) : (p.nodes || []),
+                        edges: edgeUpdater ? (typeof edgeUpdater === 'function' ? edgeUpdater(p.edges || []) : edgeUpdater) : (p.edges || [])
+                    };
+                }));
+            }, [activeProjectId]);
+
+            const updateDocContent = (content) => { const finalContent = (!content || content.trim() === '') ? '　' : content; setProjects(prev => prev.map(p => p.id === activeProjectId ? { ...p, content: finalContent } : p)); if (!content || content.trim() === '') { requestAnimationFrame(() => { if (textareaRef.current) { textareaRef.current.setSelectionRange(1, 1); } }); } };
+
+            // 비교 모드용 문서 내용 업데이트
+            const updateCompareDocContent = (docId, content) => {
+                const finalContent = (!content || content.trim() === '') ? '　' : content;
+                setProjects(prev => prev.map(p => p.id === docId ? { ...p, content: finalContent } : p));
+            };
+
+            // 비교 모드용 프로젝트 가져오기
+            const getCompareDoc = (index) => {
+                const docId = compareDocIds[index];
+                return projects.find(p => p.id === docId) || null;
+            };
+
+            // 분할선 드래그 핸들러 - DOM 직접 조작으로 실시간 반응
+            const splitterRafId = useRef(null);
+            const compareContainerRef = useRef(null);
+
+            const handleSplitterMouseDown = (e) => {
+                e.preventDefault();
+                isDraggingSplitter.current = true;
+                setIsSplitterDragging(true);
+                compareContainerRef.current = document.querySelector('.compare-container');
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+            };
+
+            useEffect(() => {
+                if (!compareMode) return;
+
+                const handleMouseMove = (e) => {
+                    if (!isDraggingSplitter.current || !compareContainerRef.current) return;
+
+                    // 이전 애니메이션 프레임 취소
+                    if (splitterRafId.current) {
+                        cancelAnimationFrame(splitterRafId.current);
+                    }
+
+                    // requestAnimationFrame으로 실시간 DOM 업데이트
+                    splitterRafId.current = requestAnimationFrame(() => {
+                        const rect = compareContainerRef.current.getBoundingClientRect();
+                        const newRatio = Math.max(20, Math.min(80, ((e.clientX - rect.left) / rect.width) * 100));
+
+                        // DOM 직접 조작으로 즉시 반영
+                        const leftPane = compareContainerRef.current.children[0];
+                        const rightPane = compareContainerRef.current.children[2];
+                        if (leftPane && rightPane) {
+                            leftPane.style.width = `${newRatio}%`;
+                            rightPane.style.width = `${100 - newRatio}%`;
+                        }
+
+                        // state도 업데이트 (나중에 동기화용)
+                        setSplitRatio(newRatio);
+                    });
+                };
+
+                const handleMouseUp = () => {
+                    if (splitterRafId.current) {
+                        cancelAnimationFrame(splitterRafId.current);
+                    }
+                    isDraggingSplitter.current = false;
+                    setIsSplitterDragging(false);
+                    compareContainerRef.current = null;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                };
+
+                window.addEventListener('mousemove', handleMouseMove);
+                window.addEventListener('mouseup', handleMouseUp);
+                return () => {
+                    window.removeEventListener('mousemove', handleMouseMove);
+                    window.removeEventListener('mouseup', handleMouseUp);
+                };
+            }, [compareMode]);
+
+            const [history, setHistory] = useState({ past: [], future: [] });
+            const [isPanning, setIsPanning] = useState(false);
+            const [draggingNodeId, setDraggingNodeId] = useState(null);
+            const [dragOffset, setDragOffset] = useState({ x: 0, y: 0, nodeIds: new Set() }); // 드래그 중 오프셋
+            const [tempEdge, setTempEdge] = useState(null);
+            const [selectedNodeId, setSelectedNodeId] = useState(null); // For modal
+            const [selectedNodeIds, setSelectedNodeIds] = useState(new Set()); // For multi-select
+            const [selectedEdgeId, setSelectedEdgeId] = useState(null);
+            const [topNodeId, setTopNodeId] = useState(null);
+            const [marquee, setMarquee] = useState(null); // For selection rectangle
+
+            const lastMousePos = useRef({ x: 0, y: 0 });
+            const hasConnectedRef = useRef(false);
+            const [sidebarDrag, setSidebarDrag] = useState({ active: false, nodeId: null, type: null, startIdx: null, currentIdx: null, x: 0, y: 0 });
+            const sidebarDragRef = useRef(null);
+            const isMarqueeSelectingRef = useRef(false);
+            const selectedNodeIdsRef = useRef(selectedNodeIds);
+
+            const saveHistory = useCallback(() => { setHistory(prev => ({ past: [...prev.past.slice(-19), { projects }], future: [] })); }, [projects]);
+            const undo = useCallback(() => { setHistory(prev => { if (prev.past.length === 0) return prev; const previous = prev.past[prev.past.length - 1]; const newPast = prev.past.slice(0, prev.past.length - 1); setProjects(previous.projects); showToast("실행 취소됨"); return { past: newPast, future: [{ projects }, ...prev.future] }; }); }, [projects, showToast]);
+
+            useEffect(() => { selectedNodeIdsRef.current = selectedNodeIds; }, [selectedNodeIds]);
+
+            useEffect(() => {
+                const handleKeyDown = (e) => {
+                    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeIds.size > 0) {
+                        if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+                        e.preventDefault();
+                        if (confirm(`${selectedNodeIds.size}개의 노드를 삭제하시겠습니까?`)) {
+                            saveHistory();
+                            updateActiveProject(
+                                prevNodes => prevNodes.filter(n => !selectedNodeIds.has(n.id)),
+                                prevEdges => prevEdges.filter(edge => !selectedNodeIds.has(edge.from) && !selectedNodeIds.has(edge.to))
+                            );
+                            setSelectedNodeIds(new Set());
+                        }
+                    }
+                };
+                window.addEventListener('keydown', handleKeyDown);
+                return () => window.removeEventListener('keydown', handleKeyDown);
+            }, [selectedNodeIds, saveHistory, updateActiveProject]);
+
+            useEffect(() => {
+                const handleUndoKeyDown = (e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                        e.preventDefault(); undo();
+                    }
+                };
+                window.addEventListener('keydown', handleUndoKeyDown);
+                return () => window.removeEventListener('keydown', handleUndoKeyDown);
+            }, [undo]);
+
+            useEffect(() => {
+                const handleZenModeKeyDown = (e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'j') {
+                        e.preventDefault();
+                        if (activeProject && activeProject.type === 'doc') {
+                            if (isSidebarOpen && !isZenMode) {
+                                // 1단계: 사이드바만 숨김
+                                setIsSidebarOpen(false);
+                                setIsZenMode(false);
+                            } else if (!isSidebarOpen && !isZenMode) {
+                                // 2단계: 집중모드 활성화
+                                setIsSidebarOpen(false);
+                                setIsZenMode(true);
+                            } else {
+                                // 3단계: 모든 효과 취소
+                                setIsSidebarOpen(true);
+                                setIsZenMode(false);
+                            }
+                        }
+                    }
+                };
+                window.addEventListener('keydown', handleZenModeKeyDown);
+                return () => window.removeEventListener('keydown', handleZenModeKeyDown);
+            }, [activeProject, isSidebarOpen, isZenMode]);
+
+            useEffect(() => {
+                const handleCopyCut = (e) => {
+                    const activeTag = document.activeElement ? document.activeElement.tagName : '';
+                    if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || (document.activeElement && document.activeElement.isContentEditable)) {
+                        return;
+                    }
+
+                    const keyLower = (e.key || '').toLowerCase();
+                    const isCopy = (e.ctrlKey || e.metaKey) && (keyLower === 'c' || e.code === 'KeyC');
+                    const isCut = (e.ctrlKey || e.metaKey) && (keyLower === 'x' || e.code === 'KeyX');
+
+                    if (isCopy || isCut) {
+                        if (activeProject && activeProject.type === 'board' && selectedNodeIds.size > 0) {
+                            const selectedNodes = activeProject.nodes.filter(n => selectedNodeIds.has(n.id));
+                            const selectedEdges = activeProject.edges.filter(ed => selectedNodeIds.has(ed.from) && selectedNodeIds.has(ed.to));
+
+                            const plainTextParts = selectedNodes.map(n => {
+                                let text = n.label || '';
+                                if (n.data?.memo) text += '\n' + n.data.memo;
+                                if (n.data?.items) text += '\n' + n.data.items.map(i => `- [${i.done ? 'x' : ' '}] ${i.text}`).join('\n');
+                                return text;
+                            });
+                            const plainText = plainTextParts.join('\n\n---\n\n');
+
+                            const clipboardPayload = JSON.stringify({
+                                __summerNodes: true,
+                                nodes: selectedNodes,
+                                edges: selectedEdges
+                            });
+
+                            window.__summerClipboardData = clipboardPayload;
+
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                                navigator.clipboard.writeText(plainText).catch(() => {});
+                            }
+
+                            if (isCut) {
+                                saveHistory();
+                                updateActiveProject(
+                                    prevNodes => prevNodes.filter(n => !selectedNodeIds.has(n.id)),
+                                    prevEdges => prevEdges.filter(edge => !selectedNodeIds.has(edge.from) && !selectedNodeIds.has(edge.to))
+                                );
+                                setSelectedNodeIds(new Set());
+                                showToast(`${selectedNodes.length}개의 노드를 잘라냈습니다.`);
+                            } else {
+                                showToast(`${selectedNodes.length}개의 노드를 복사했습니다.`);
+                            }
+                        }
+                    }
+                };
+
+                window.addEventListener('keydown', handleCopyCut);
+                return () => window.removeEventListener('keydown', handleCopyCut);
+            }, [activeProject, selectedNodeIds, saveHistory, updateActiveProject, showToast]);
+
+
+            useEffect(() => {
+                const div = containerRef.current;
+                const handleWheel = (e) => {
+                    if (!div || e.target.closest('aside') || (activeProject && activeProject.type === 'doc') || corkboardMode) return;
+                    e.preventDefault(); // 브라우저 기본 줌 방지
+
+                    const rect = div.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+
+                    // 줌 속도 조절 (트랙패드 등 감안)
+                    const delta = -e.deltaY * 0.001;
+
+                    // 줌 범위 제한 (0.1 ~ 3.0 -> 0.2 ~ 5.0 정도가 적당)
+                    const newScale = Math.min(Math.max(0.2, scale + delta), 5);
+
+                    const scaleRatio = newScale / scale;
+                    setPan(prev => ({
+                        x: mouseX - (mouseX - prev.x) * scaleRatio,
+                        y: mouseY - (mouseY - prev.y) * scaleRatio
+                    }));
+                    setScale(newScale);
+                };
+                if (div) {
+                    div.addEventListener('wheel', handleWheel, { passive: false });
+                    return () => div.removeEventListener('wheel', handleWheel);
+                }
+            }, [scale, activeProject, corkboardMode]);
+
+            const getCanvasCoords = (clientX, clientY) => {
+                if (!containerRef.current) return { x: 0, y: 0 };
+                const rect = containerRef.current.getBoundingClientRect();
+                return { x: (clientX - rect.left - pan.x) / scale, y: (clientY - rect.top - pan.y) / scale };
+            };
+            // 드래그 중 오프셋이 적용된 노드 위치 반환
+            const findNode = (id) => {
+                const node = nodes.find(n => n.id === id);
+                if (!node) return null;
+                if (draggingNodeId && dragOffset.nodeIds.has(id)) {
+                    return { ...node, x: node.x + dragOffset.x, y: node.y + dragOffset.y };
+                }
+                return node;
+            };
+
+            const createNewProject = () => { const newId = generateUUID(); saveHistory(); setProjects(prev => [...prev, { id: newId, type: 'board', name: '새 보드', nodes: [], edges: [], sidebarColumns: 1 }]); setActiveProjectId(newId); setExpandedProjects(prev => ({ ...prev, [newId]: true })); setEditingProjectId(newId); setPan({ x: 0, y: 0 }); setScale(1); setIsZenMode(false); setIsTrashOpen(false); };
+            const createNewDoc = () => { const newId = generateUUID(); saveHistory(); setProjects(prev => [...prev, { id: newId, type: 'doc', name: '새 문서', content: '　', history: [], status: '초고', targetCount: defaultTargetCount }]); setActiveProjectId(newId); setExpandedProjects(prev => ({ ...prev, [newId]: true })); setEditingProjectId(newId); setIsTrashOpen(false); };
+
+            // 휴지통으로 이동
+            const deleteProject = (id, e) => {
+                if (e) e.stopPropagation();
+                const projectToDelete = projects.find(p => p.id === id);
+                if (!projectToDelete) return;
+
+                saveHistory();
+                setTrash(prev => [...prev, { ...projectToDelete, deletedAt: Date.now() }]);
+
+                let newProjects = projects.filter(p => p.id !== id);
+                if (newProjects.length === 0) {
+                    const dummyId = generateUUID();
+                    newProjects = [{ id: dummyId, type: 'board', name: '새 프로젝트', nodes: [], edges: [] }];
+                    handleSelectProject(dummyId);
+                } else if (activeProjectId === id) {
+                    handleSelectProject(newProjects[0].id);
+                }
+                setProjects(newProjects);
+                showToast("휴지통으로 이동됨");
+            };
+
+            // 휴지통에서 복원
+            const restoreFromTrash = (id) => {
+                const itemToRestore = trash.find(p => p.id === id);
+                if (!itemToRestore) return;
+
+                const { deletedAt, ...restoredProject } = itemToRestore;
+                setProjects(prev => [...prev, restoredProject]);
+                setTrash(prev => prev.filter(p => p.id !== id));
+                showToast("복원됨");
+            };
+
+            // 휴지통에서 완전 삭제
+            const permanentDelete = (id) => {
+                if (confirm("완전히 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) {
+                    setTrash(prev => prev.filter(p => p.id !== id));
+                    showToast("완전히 삭제됨");
+                }
+            };
+
+            // 휴지통 비우기
+            const emptyTrash = () => {
+                if (trash.length === 0) return;
+                if (confirm(`휴지통의 ${trash.length}개 항목을 모두 삭제하시겠습니까?`)) {
+                    setTrash([]);
+                    showToast("휴지통 비움");
+                }
+            };
+            const handleProjectRename = (id, newName) => { saveHistory(); setProjects(prev => prev.map(p => p.id === id ? { ...p, name: newName } : p)); setEditingProjectId(null); };
+
+            const getDefaultNodeData = (type) => {
+                switch (type) {
+                    case '인물': return { emoji: '👤', age: '', gender: '미지정', job: '', race: '인간', role: '조연', memo: '' };
+                    case '사건': return { emoji: '🔥', place: '', year: '', memo: '' };
+                    case '메모': return { emoji: '💡', category: '메모', memo: '' };
+                    case '장소': return { emoji: '📍', region: '', climate: '', description: '', memo: '' };
+                    case '아이템': return { emoji: '🎁', category: '일반', rarity: '보통', owner: '', effect: '', memo: '' };
+                    case '세력': return { emoji: '⚔️', leader: '', members: '', territory: '', goal: '', memo: '' };
+                    case '복선': return { emoji: '🎣', chapter: '', status: '미회수', hint: '', reveal: '', memo: '' };
+                    case '타임라인': return { emoji: '⏰', date: '', era: '', importance: '보통', memo: '' };
+                    case '설정': return { emoji: '📚', category: '세계관', scope: '', memo: '' };
+                    case '대사': return { emoji: '💬', speaker: '', situation: '', emotion: '', memo: '' };
+                    case '갈등': return { emoji: '⚡', parties: '', cause: '', status: '진행중', resolution: '', memo: '' };
+                    case '할일': return { emoji: '✅', items: [], memo: '' };
+                    case '그룹': return { emoji: '📁', color: '#94a3b8', width: 400, height: 300, childNodes: [], memo: '' };
+                    default: return { emoji: '📝', memo: '' };
+                }
+            };
+            const addNode = (type) => {
+                saveHistory();
+                const id = generateUUID();
+                const rect = containerRef.current.getBoundingClientRect();
+                const center = getCanvasCoords(rect.left + rect.width / 2, rect.top + rect.height / 2);
+
+                const defaultData = getDefaultNodeData(type);
+
+                updateActiveProject(prev => [...prev, { id, x: center.x - CARD_W / 2, y: center.y - CARD_H / 2, label: `새 ${type}`, type, data: defaultData }]);
+                setTopNodeId(id);
+            };
+            const deleteNode = (id) => {
+                saveHistory();
+
+                updateActiveProject(
+                    // 1. 노드 목록 업데이트
+                    prevNodes => {
+                        // 삭제 대상 노드 제거
+                        const filtered = prevNodes.filter(n => n.id !== id);
+
+                        // [추가된 로직] 남은 노드들 중 '그룹' 노드 내부에 삭제된 ID가 있다면 제거
+                        return filtered.map(node => {
+                            if (node.type === '그룹' && node.data.childNodes && node.data.childNodes.includes(id)) {
+                                return {
+                                    ...node,
+                                    data: {
+                                        ...node.data,
+                                        childNodes: node.data.childNodes.filter(childId => childId !== id)
+                                    }
+                                };
+                            }
+                            return node;
+                        });
+                    },
+                    // 2. 엣지 목록 업데이트 (기존과 동일)
+                    prevEdges => prevEdges.filter(e => e.from !== id && e.to !== id)
+                );
+
+                if (selectedNodeId === id) setSelectedNodeId(null);
+                setSelectedNodeIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+            };
+
+            const resizeGroupNode = (id, width, height) => {
+                updateActiveProject(prev => prev.map(n =>
+                    n.id === id ? { ...n, data: { ...n.data, width, height } } : n
+                ));
+            };
+
+            const ALL_NODE_TYPES = ['인물', '사건', '메모', '장소', '아이템', '세력', '복선', '타임라인', '설정', '대사', '갈등', '할일', '그룹'];
+            const handleReorderNodes = (type, newOrder) => {
+                saveHistory();
+                updateActiveProject(allNodes => {
+                    const newOrderIds = newOrder.map(n => n.id);
+                    const reorderedNodes = newOrderIds.map(id => allNodes.find(n => n.id === id)).filter(Boolean);
+
+                    // 각 타입별로 노드 분리
+                    const nodesByType = {};
+                    ALL_NODE_TYPES.forEach(t => {
+                        nodesByType[t] = type === t ? reorderedNodes : allNodes.filter(n => n.type === t);
+                    });
+
+                    // 모든 타입의 노드를 순서대로 합침
+                    return ALL_NODE_TYPES.flatMap(t => nodesByType[t]);
+                });
+            };
+
+            const handleReorderBoards = (newOrder) => {
+                saveHistory();
+                setProjects(prevProjects => {
+                    const docs = prevProjects.filter(p => p.type === 'doc');
+                    const newOrderIds = newOrder.map(p => p.id);
+                    const reorderedBoards = newOrderIds.map(id => prevProjects.find(p => p.id === id)).filter(Boolean);
+                    return [...reorderedBoards, ...docs];
+                });
+            };
+
+            const handleReorderDocs = (newOrder) => {
+                setProjects(prevProjects => {
+                    const boards = prevProjects.filter(p => p.type === 'board');
+                    const newOrderIds = newOrder.map(p => p.id);
+                    const reorderedDocs = newOrderIds.map(id => prevProjects.find(p => p.id === id)).filter(Boolean);
+                    return [...boards, ...reorderedDocs];
+                });
+            };
+
+            // 사이드바 그리드 드래그 핸들러
+            const handleSidebarDragStart = (e, node, type, idx) => {
+                e.preventDefault();
+                const rect = e.currentTarget.getBoundingClientRect();
+                setSidebarDrag({
+                    active: true,
+                    nodeId: node.id,
+                    type,
+                    startIdx: idx,
+                    currentIdx: idx,
+                    x: e.clientX,
+                    y: e.clientY,
+                    offsetX: e.clientX - rect.left,
+                    offsetY: e.clientY - rect.top,
+                    width: rect.width,
+                    height: rect.height
+                });
+                sidebarDragRef.current = node;
+            };
+
+            const handleSidebarDragMove = useCallback((e) => {
+                if (!sidebarDrag.active) return;
+                setSidebarDrag(prev => ({ ...prev, x: e.clientX, y: e.clientY }));
+
+                // 현재 마우스 위치에서 가장 가까운 드롭 타겟 찾기
+                const elements = document.querySelectorAll(`[data-sidebar-type="${sidebarDrag.type}"]`);
+                let closestIdx = sidebarDrag.startIdx;
+                let closestDist = Infinity;
+
+                elements.forEach((el, idx) => {
+                    const rect = el.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height / 2;
+                    const dist = Math.hypot(e.clientX - centerX, e.clientY - centerY);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestIdx = idx;
+                    }
+                });
+
+                if (closestIdx !== sidebarDrag.currentIdx) {
+                    setSidebarDrag(prev => ({ ...prev, currentIdx: closestIdx }));
+                }
+            }, [sidebarDrag.active, sidebarDrag.type, sidebarDrag.startIdx, sidebarDrag.currentIdx]);
+
+            const handleSidebarDragEnd = useCallback(() => {
+                if (!sidebarDrag.active) return;
+
+                const { type, startIdx, currentIdx } = sidebarDrag;
+                if (startIdx !== currentIdx) {
+                    saveHistory();
+                    updateActiveProject(allNodes => {
+                        const filtered = allNodes.filter(n => n.type === type);
+                        const others = allNodes.filter(n => n.type !== type);
+
+                        // 순서 변경
+                        const newFiltered = [...filtered];
+                        const [moved] = newFiltered.splice(startIdx, 1);
+                        newFiltered.splice(currentIdx, 0, moved);
+
+                        const persons = type === '인물' ? newFiltered : others.filter(n => n.type === '인물');
+                        const events = type === '사건' ? newFiltered : others.filter(n => n.type === '사건');
+                        const memos = type === '메모' ? newFiltered : others.filter(n => n.type === '메모');
+
+                        return [...persons, ...events, ...memos];
+                    });
+                }
+
+                setSidebarDrag({ active: false, nodeId: null, type: null, startIdx: null, currentIdx: null, x: 0, y: 0 });
+                sidebarDragRef.current = null;
+            }, [sidebarDrag, saveHistory, updateActiveProject]);
+
+            useEffect(() => {
+                if (sidebarDrag.active) {
+                    window.addEventListener('mousemove', handleSidebarDragMove);
+                    window.addEventListener('mouseup', handleSidebarDragEnd);
+                    return () => {
+                        window.removeEventListener('mousemove', handleSidebarDragMove);
+                        window.removeEventListener('mouseup', handleSidebarDragEnd);
+                    };
+                }
+            }, [sidebarDrag.active, handleSidebarDragMove, handleSidebarDragEnd]);
+
+            // 1. Workspace 컴포넌트 상단(ref 선언부)에 rAF용 ref 추가
+            const rAF = useRef(null);
+            const latestMousePos = useRef({ x: 0, y: 0 });
+
+            const isPanningRef = useRef(isPanning);
+            const draggingNodeIdRef = useRef(draggingNodeId);
+            const scaleRef = useRef(scale);
+            const tempEdgeRef = useRef(tempEdge);
+            const nodesRef = useRef(nodes);
+            const dragOffsetRef = useRef({ x: 0, y: 0, nodeIds: new Set() });
+
+            useEffect(() => { isPanningRef.current = isPanning; }, [isPanning]);
+            useEffect(() => { draggingNodeIdRef.current = draggingNodeId; }, [draggingNodeId]);
+            useEffect(() => { scaleRef.current = scale; window.currentScale = scale; }, [scale]);
+            useEffect(() => { tempEdgeRef.current = tempEdge; }, [tempEdge]);
+            useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+
+            // 2. handleGlobalMouseMove 함수 교체
+            const handleGlobalMouseMove = (e) => {
+                if (activeProject.type === 'doc') return;
+
+                const currentX = e.clientX;
+                const currentY = e.clientY;
+                const dx = currentX - lastMousePos.current.x;
+                const dy = currentY - lastMousePos.current.y;
+
+                if (isMarqueeSelectingRef.current && marquee) {
+                    const currentCoords = getCanvasCoords(currentX, currentY);
+                    setMarquee(prev => {
+                        const x = Math.min(prev.startX, currentCoords.x);
+                        const y = Math.min(prev.startY, currentCoords.y);
+                        const width = Math.abs(currentCoords.x - prev.startX);
+                        const height = Math.abs(currentCoords.y - prev.startY);
+                        return { ...prev, x, y, width, height };
+                    });
+                } else if (isPanningRef.current) {
+                    setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+                } else if (draggingNodeIdRef.current) {
+                    const scaleFactor = 1 / scaleRef.current;
+                    const dragId = draggingNodeIdRef.current;
+                    const deltaX = dx * scaleFactor;
+                    const deltaY = dy * scaleFactor;
+                    const selectedIds = selectedNodeIdsRef.current;
+
+                    // 이동할 노드 ID 집합을 미리 계산 (첫 프레임에서만)
+                    let nodesToMove = dragOffsetRef.current.nodeIds;
+                    if (nodesToMove.size === 0) {
+                        nodesToMove = new Set();
+                        const currentNodes = nodes;
+
+                        // 재귀적으로 그룹의 모든 자식 노드 수집
+                        const collectAllChildren = (nodeId, nodesList) => {
+                            nodesToMove.add(nodeId);
+                            const node = nodesList.find(n => n.id === nodeId);
+                            if (node?.type === '그룹' && node.data.childNodes) {
+                                node.data.childNodes.forEach(childId => {
+                                    if (!nodesToMove.has(childId)) {
+                                        collectAllChildren(childId, nodesList);
+                                    }
+                                });
+                            }
+                        };
+
+                        const draggedNode = currentNodes.find(n => n.id === dragId);
+                        const isGroupDrag = draggedNode?.type === '그룹';
+
+                        if (selectedIds.has(dragId) && selectedIds.size > 1) {
+                            selectedIds.forEach(id => nodesToMove.add(id));
+                        } else if (isGroupDrag) {
+                            collectAllChildren(dragId, currentNodes);
+                        } else {
+                            nodesToMove.add(dragId);
+                        }
+                        dragOffsetRef.current.nodeIds = nodesToMove;
+                    }
+
+                    // 오프셋 누적
+                    const newOffsetX = dragOffsetRef.current.x + deltaX;
+                    const newOffsetY = dragOffsetRef.current.y + deltaY;
+                    dragOffsetRef.current = { x: newOffsetX, y: newOffsetY, nodeIds: nodesToMove };
+                    setDragOffset({ x: newOffsetX, y: newOffsetY, nodeIds: nodesToMove });
+                }
+
+                if (tempEdgeRef.current) {
+                    const c = getCanvasCoords(currentX, currentY);
+                    setTempEdge(prev => ({ ...prev, toX: c.x, toY: c.y }));
+                }
+
+                lastMousePos.current = { x: currentX, y: currentY };
+            };
+
+            const handleGlobalMouseUp = (e) => {
+                if (activeProject.type === 'board') {
+                    if (isMarqueeSelectingRef.current && marquee) {
+                        const marqueeRect = { x: marquee.x, y: marquee.y, x2: marquee.x + marquee.width, y2: marquee.y + marquee.height };
+                        const nodesInMarquee = nodes.filter(node => {
+                            const nodeRect = { x: node.x, y: node.y, x2: node.x + CARD_W, y2: node.y + CARD_H };
+                            return nodeRect.x < marqueeRect.x2 && nodeRect.x2 > marqueeRect.x && nodeRect.y < marqueeRect.y2 && nodeRect.y2 > marqueeRect.y;
+                        });
+
+                        if (e.shiftKey) {
+                            setSelectedNodeIds(prev => {
+                                const newSet = new Set(prev);
+                                nodesInMarquee.forEach(node => newSet.add(node.id));
+                                selectedNodeIdsRef.current = newSet;
+                                return newSet;
+                            });
+                        } else {
+                            const newSet = new Set(nodesInMarquee.map(n => n.id));
+                            setSelectedNodeIds(newSet);
+                            selectedNodeIdsRef.current = newSet;
+                        }
+                    }
+
+                    isMarqueeSelectingRef.current = false;
+                    setMarquee(null);
+
+                    // 노드 드래그 종료 시 위치 저장 및 그룹 영역 체크
+                    if (draggingNodeId) {
+                        const offset = dragOffsetRef.current;
+                        const movedNodeIds = offset.nodeIds;
+
+                        // 오프셋이 있으면 실제 위치 저장
+                        if (offset.x !== 0 || offset.y !== 0) {
+                            saveHistory();
+                            updateActiveProject(prevNodes => prevNodes.map(n =>
+                                movedNodeIds.has(n.id) ? { ...n, x: n.x + offset.x, y: n.y + offset.y } : n
+                            ));
+                        }
+
+                        // 오프셋 초기화
+                        dragOffsetRef.current = { x: 0, y: 0, nodeIds: new Set() };
+                        setDragOffset({ x: 0, y: 0, nodeIds: new Set() });
+
+                        // 이동된 모든 노드들에 대해 그룹 체크 (그룹 노드는 제외)
+                        movedNodeIds.forEach(mId => {
+                            const mNode = nodes.find(n => n.id === mId);
+                            if (mNode && mNode.type !== '그룹') {
+                                const nodeCenterX = mNode.x + offset.x + CARD_W / 2;
+                                const nodeCenterY = mNode.y + offset.y + CARD_H / 2;
+
+                                const currentParentGroup = nodes.find(n => n.type === '그룹' && n.id !== mId && n.data.childNodes?.includes(mId));
+                                const groupNodes = nodes.filter(n => n.type === '그룹');
+                                let targetGroup = null;
+
+                                for (const group of groupNodes) {
+                                    const gx = group.x + (movedNodeIds.has(group.id) ? offset.x : 0);
+                                    const gy = group.y + (movedNodeIds.has(group.id) ? offset.y : 0);
+                                    const gw = group.data.width || 400;
+                                    const gh = group.data.height || 300;
+
+                                    if (nodeCenterX >= gx && nodeCenterX <= gx + gw &&
+                                        nodeCenterY >= gy && nodeCenterY <= gy + gh) {
+                                        targetGroup = group;
+                                        break;
+                                    }
+                                }
+
+                                // 그룹 상태 변경이 필요한 경우에만 업데이트
+                                if (currentParentGroup?.id !== targetGroup?.id) {
+                                    updateActiveProject(prevNodes => prevNodes.map(n => {
+                                        // 기존 그룹에서 제거
+                                        if (currentParentGroup && n.id === currentParentGroup.id) {
+                                            return { ...n, data: { ...n.data, childNodes: (n.data.childNodes || []).filter(id => id !== mId) } };
+                                        }
+                                        // 새 그룹에 추가
+                                        if (targetGroup && n.id === targetGroup.id) {
+                                            if (!n.data.childNodes?.includes(mId)) {
+                                                return { ...n, data: { ...n.data, childNodes: [...(n.data.childNodes || []), mId] } };
+                                            }
+                                        }
+                                        return n;
+                                    }));
+                                }
+                            }
+                        });
+                    }
+                    if (tempEdge && !hasConnectedRef.current) {
+                        const c = getCanvasCoords(e.clientX, e.clientY);
+                        // 마우스 위치에 있는 노드 찾기 (출발 노드 제외)
+                        const targetNode = nodes.find(n =>
+                            n.id !== tempEdge.fromId &&
+                            c.x >= n.x && c.x <= n.x + CARD_W &&
+                            c.y >= n.y && c.y <= n.y + CARD_H
+                        );
+
+                        if (targetNode) {
+                            const edgeExists = edges.some(e =>
+                                (e.from === tempEdge.fromId && e.to === targetNode.id) ||
+                                (e.from === targetNode.id && e.to === tempEdge.fromId)
+                            );
+                            if (edgeExists) {
+                            } else {
+                                saveHistory();
+                                const fromNode = findNode(tempEdge.fromId);
+                                const edgeLabel = '';
+                                updateActiveProject(null, prev => [...prev, { id: generateUUID(), from: tempEdge.fromId, to: targetNode.id, label: edgeLabel }]);
+                            }
+                        } else {
+                            const fromNode = findNode(tempEdge.fromId);
+                            if (fromNode) {
+                                saveHistory();
+                                const newNodeId = generateUUID();
+                                const defaultData = getDefaultNodeData(fromNode.type);
+                                const edgeLabel = '';
+                                updateActiveProject(prev => [...prev, { id: newNodeId, x: c.x - CARD_W / 2, y: c.y - CARD_H / 2, label: `새 ${fromNode.type}`, type: fromNode.type, data: defaultData }], prev => [...prev, { id: generateUUID(), from: tempEdge.fromId, to: newNodeId, label: edgeLabel }]);
+                            }
+                        }
+                    }
+                    hasConnectedRef.current = false;
+                    setIsPanning(false);
+                    setDraggingNodeId(null);
+                    setTempEdge(null);
+                }
+            };
+
+            const handleDocInput = (e) => {
+                const inputType = e.nativeEvent.inputType;
+                let val = e.target.value;
+                let pos = e.target.selectionStart;
+                const lastChar = val[pos - 1];
+
+                // 줄바꿈 시 자동 들여쓰기 (문단 첫줄 띄우기)
+                if (inputType === 'insertLineBreak') {
+                    const indent = '　'; // 공백으로 확실하게 들여쓰기
+                    const scrollTop = e.target.scrollTop; // 스크롤 위치 저장
+                    val = val.slice(0, pos) + indent + val.slice(pos);
+
+                    updateDocContent(val);
+                    requestAnimationFrame(() => {
+                        if (textareaRef.current) {
+                            textareaRef.current.scrollTop = scrollTop; // 스크롤 위치 복구
+                            textareaRef.current.setSelectionRange(pos + indent.length, pos + indent.length);
+                            // 엔터 입력 직후 스크롤 목표 갱신
+                            if (isZenMode) {
+                                updateFocusScroll();
+                            }
+                        }
+                    });
+                    return;
+                }
+
+                if (inputType === 'insertFromPaste') {
+                    if (mention.active) {
+                        const currentSearch = val.slice(mention.pos, pos);
+                        if (/[\s\n]/.test(currentSearch)) {
+                            setMention({ ...mention, active: false });
+                        } else {
+                            setMention({ ...mention, search: currentSearch, selectedIndex: 0 });
+                        }
+                    }
+                    updateDocContent(val);
+                    return;
+                }
+
+                if (lastChar === '#' || lastChar === '@' || lastChar === '$' || lastChar === '%') {
+                    const coords = getCaretCoordinates(e.target, pos);
+                    const rect = e.target.getBoundingClientRect();
+                    const visualY = coords.top - (e.target.scrollTop * 2);
+
+                    let finalX, finalY;
+
+                    if (isZenMode) {
+                        finalX = Math.max(rect.left + 20, rect.left + coords.left - 610);
+                        finalY = visualY + 20;
+                    } else {
+                        finalX = coords.left;
+                        finalY = visualY + 25;
+                    }
+
+                    const menuWidth = 600;
+                    const menuHeight = 400;
+
+                    if (finalX + menuWidth > window.innerWidth) finalX = window.innerWidth - menuWidth - 20;
+                    if (!isZenMode && (finalY + menuHeight > window.innerHeight)) {
+                        finalY = visualY - menuHeight - 10;
+                    }
+
+                    setMention({ active: true, type: lastChar, search: '', x: finalX, y: finalY, pos, selectedIndex: 0 });
+
+                } else if (mention.active) {
+                    const currentSearch = val.slice(mention.pos, pos);
+                    if (!lastChar || /[\s\n]/.test(lastChar) || pos < mention.pos) {
+                        setMention({ ...mention, active: false });
+                    } else {
+                        setMention({ ...mention, search: currentSearch, selectedIndex: 0 });
+                    }
+                }
+
+                updateDocContent(val);
+            };
+
+            const insertMention = (node) => {
+                const text = activeProject.content || "";
+                const before = text.slice(0, mention.pos - 1);
+                const after = text.slice(mention.pos + mention.search.length);
+                const insertedText = node.label + "";
+                const newText = before + insertedText + after;
+                updateDocContent(newText);
+                setMention({ ...mention, active: false });
+                const newCursorPos = before.length + insertedText.length;
+                requestAnimationFrame(() => {
+                    if (textareaRef.current) {
+                        textareaRef.current.focus();
+                        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+                        if (typeof updateFocusScroll === 'function') {
+                            updateFocusScroll();
+                        }
+                    }
+                });
+            };
+
+            const handleDocKeyDown = (e) => {
+                if (e.nativeEvent.isComposing) return;
+
+                if (mention.active) {
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setMention(prev => ({ ...prev, selectedIndex: (prev.selectedIndex + 1) % filteredMentionNodes.length }));
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setMention(prev => ({ ...prev, selectedIndex: (prev.selectedIndex - 1 + filteredMentionNodes.length) % filteredMentionNodes.length }));
+                    } else if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (filteredMentionNodes[mention.selectedIndex]) insertMention(filteredMentionNodes[mention.selectedIndex]);
+                    } else if (e.key === 'Escape') {
+                        setMention({ ...mention, active: false });
+                    }
+                }
+            };
+
+            const handleAutoLayout = useCallback(() => {
+                if (!window.dagre) {
+                    showToast("정렬 라이브러리가 아직 로드되지 않았습니다. 잠시 후 다시 시도해 주세요.", "error");
+                    return;
+                }
+                if (!activeProject || activeProject.type !== 'board') return;
+                saveHistory();
+
+                const GAP_BETWEEN_GROUPS = 400;
+
+                const groups = {
+                    '인물': activeProject.nodes.filter(n => n.type === '인물'),
+                    '사건': activeProject.nodes.filter(n => n.type === '사건'),
+                    '메모': activeProject.nodes.filter(n => n.type === '메모'),
+                    '장소': activeProject.nodes.filter(n => n.type === '장소'),
+                    '아이템': activeProject.nodes.filter(n => n.type === '아이템'),
+                    '세력': activeProject.nodes.filter(n => n.type === '세력'),
+                    '복선': activeProject.nodes.filter(n => n.type === '복선'),
+                    '타임라인': activeProject.nodes.filter(n => n.type === '타임라인'),
+                    '설정': activeProject.nodes.filter(n => n.type === '설정'),
+                    '대사': activeProject.nodes.filter(n => n.type === '대사'),
+                    '갈등': activeProject.nodes.filter(n => n.type === '갈등'),
+                    '할일': activeProject.nodes.filter(n => n.type === '할일'),
+                    '그룹': activeProject.nodes.filter(n => n.type === '그룹')
+                };
+
+                const getInternalEdges = (groupNodes) => {
+                    const ids = new Set(groupNodes.map(n => n.id));
+                    return activeProject.edges.filter(e => ids.has(e.from) && ids.has(e.to));
+                };
+
+                const layoutGroup = (groupNodes, groupEdges) => {
+                    if (groupNodes.length === 0) return { nodes: [], width: 0, height: 0 };
+                    const g = new dagre.graphlib.Graph();
+                    g.setGraph({ rankdir: 'TB', ranksep: 100, nodesep: 60 });
+                    g.setDefaultEdgeLabel(() => ({}));
+                    groupNodes.forEach(node => g.setNode(node.id, { width: CARD_W, height: CARD_H }));
+                    groupEdges.forEach(edge => g.setEdge(edge.from, edge.to));
+                    dagre.layout(g);
+
+                    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                    const positioned = groupNodes.map(node => {
+                        const pos = g.node(node.id);
+                        const x = pos.x - CARD_W / 2;
+                        const y = pos.y - CARD_H / 2;
+                        if (x < minX) minX = x;
+                        if (x + CARD_W > maxX) maxX = x + CARD_W;
+                        if (y < minY) minY = y;
+                        if (y + CARD_H > maxY) maxY = y + CARD_H;
+                        return { ...node, x, y };
+                    });
+                    return {
+                        nodes: positioned.map(n => ({ ...n, x: n.x - minX, y: n.y - minY })),
+                        width: maxX - minX,
+                        height: maxY - minY
+                    };
+                };
+
+                // 각 타입별 레이아웃
+                const results = {};
+                Object.keys(groups).forEach(type => {
+                    results[type] = layoutGroup(groups[type], getInternalEdges(groups[type]));
+                });
+
+                // Row 1: 인물, 사건, 메모, 할일
+                const ROW_GAP = 100;
+                let row1X = 0;
+                let row1Height = 0;
+
+                const finalNodes = [];
+
+                ['인물', '사건', '메모', '할일'].forEach(type => {
+                    if (results[type].nodes.length > 0) {
+                        results[type].nodes.forEach(n => finalNodes.push({ ...n, x: n.x + row1X, y: n.y }));
+                        row1X += results[type].width + GAP_BETWEEN_GROUPS;
+                        row1Height = Math.max(row1Height, results[type].height);
+                    }
+                });
+
+                // Row 2: 장소, 세력, 설정
+                let row2X = 0;
+                let row2Y = row1Height + ROW_GAP;
+                let row2Height = 0;
+
+                ['장소', '세력', '설정'].forEach(type => {
+                    if (results[type].nodes.length > 0) {
+                        results[type].nodes.forEach(n => finalNodes.push({ ...n, x: n.x + row2X, y: n.y + row2Y }));
+                        row2X += results[type].width + GAP_BETWEEN_GROUPS;
+                        row2Height = Math.max(row2Height, results[type].height);
+                    }
+                });
+
+                // Row 3: 복선, 타임라인, 대사, 갈등
+                let row3X = 0;
+                let row3Y = row2Y + row2Height + ROW_GAP;
+                let row3Height = 0;
+
+                ['복선', '타임라인', '대사', '갈등'].forEach(type => {
+                    if (results[type].nodes.length > 0) {
+                        results[type].nodes.forEach(n => finalNodes.push({ ...n, x: n.x + row3X, y: n.y + row3Y }));
+                        row3X += results[type].width + GAP_BETWEEN_GROUPS;
+                        row3Height = Math.max(row3Height, results[type].height);
+                    }
+                });
+
+                // Row 4: 아이템
+                let row4X = 0;
+                let row4Y = row3Y + row3Height + ROW_GAP;
+
+                ['아이템'].forEach(type => {
+                    if (results[type].nodes.length > 0) {
+                        results[type].nodes.forEach(n => finalNodes.push({ ...n, x: n.x + row4X, y: n.y + row4Y }));
+                        row4X += results[type].width + GAP_BETWEEN_GROUPS;
+                    }
+                });
+
+                // 그룹 노드는 대각선으로 겹쳐서 배치
+                const DIAGONAL_OFFSET = 50;
+                let groupX = row4X + GAP_BETWEEN_GROUPS;
+                let groupY = row4Y;
+                results['그룹'].nodes.forEach((n, idx) => {
+                    finalNodes.push({ ...n, x: groupX + idx * DIAGONAL_OFFSET, y: groupY + idx * DIAGONAL_OFFSET });
+                });
+
+                const positionMap = new Map();
+                finalNodes.forEach(n => positionMap.set(n.id, { x: n.x, y: n.y }));
+
+                // 자동 정렬 시 모든 그룹 노드의 childNodes 초기화
+                updateActiveProject(prevNodes =>
+                    prevNodes.map(n => {
+                        const newPos = positionMap.get(n.id);
+                        if (n.type === '그룹') {
+                            // 그룹 노드는 childNodes 초기화
+                            return newPos
+                                ? { ...n, x: newPos.x, y: newPos.y, data: { ...n.data, childNodes: [] } }
+                                : { ...n, data: { ...n.data, childNodes: [] } };
+                        }
+                        return newPos ? { ...n, x: newPos.x, y: newPos.y } : n;
+                    })
+                );
+
+                setTimeout(() => fitToScreen(finalNodes), 100);
+
+            }, [activeProject, saveHistory, updateActiveProject, fitToScreen]);
+
+
+            const activeNode = useMemo(() => nodes.find(n => n.id === selectedNodeId), [nodes, selectedNodeId]);
+            const activeEdge = useMemo(() => edges.find(e => e.id === selectedEdgeId), [edges, selectedEdgeId]);
+
+            // 드래그 중인 노드에 오프셋 적용
+            const displayNodes = useMemo(() => {
+                if (!draggingNodeId || (dragOffset.x === 0 && dragOffset.y === 0)) return nodes;
+                return nodes.map(n =>
+                    dragOffset.nodeIds.has(n.id)
+                        ? { ...n, x: n.x + dragOffset.x, y: n.y + dragOffset.y }
+                        : n
+                );
+            }, [nodes, draggingNodeId, dragOffset]);
+
+            const visibleNodes = useMemo(() => {
+                if (activeProject?.type !== 'board') return [];
+                if (isPanning || draggingNodeId) {
+                    return displayNodes;
+                }
+
+                const viewportW = window.innerWidth;
+                const viewportH = window.innerHeight;
+                const buffer = 300;
+
+                return displayNodes.filter(node => {
+                    const screenX = node.x * scale + pan.x;
+                    const screenY = node.y * scale + pan.y;
+                    const nodeW = node.type === '그룹' ? (node.data.width || 400) : CARD_W;
+                    const nodeH = node.type === '그룹' ? (node.data.height || 300) : CARD_H;
+                    return (
+                        screenX > -nodeW * scale - buffer &&
+                        screenX < viewportW + buffer &&
+                        screenY > -nodeH * scale - buffer &&
+                        screenY < viewportH + buffer
+                    );
+                });
+            }, [activeProject?.type, isPanning, draggingNodeId, displayNodes, scale, pan]);
+
+            const visibleGroupNodes = useMemo(() => visibleNodes.filter(n => n.type === '그룹'), [visibleNodes]);
+            const visibleRegularNodes = useMemo(() => visibleNodes.filter(n => n.type !== '그룹'), [visibleNodes]);
+            // 엣지는 nodes에서 직접 참조하여 동기화 문제 해결
+            const visibleEdges = useMemo(() => {
+                if (activeProject?.type !== 'board') return [];
+                const nodeIds = new Set(nodes.map(n => n.id));
+                return edges.filter(edge => nodeIds.has(edge.from) && nodeIds.has(edge.to));
+            }, [activeProject?.type, nodes, edges]);
+
+            const renderProjectItem = (project) => {
+                const isActive = !isTrashOpen && activeProjectId === project.id; const isDoc = project.type === 'doc'; const isExpanded = expandedProjects[project.id];
+                const cols = project.sidebarColumns || 1;
+                const containerClasses = isDoc
+                    ? `transition-all duration-200 border-b border-slate-200/50 dark:border-zinc-700/50 last:border-0 ${isActive ? 'bg-white dark:bg-zinc-700' : 'hover:bg-slate-200/50 dark:hover:bg-zinc-700/50'}`
+                    : `rounded-[3px] mb-1 transition-all duration-300 ${isActive
+                        ? 'bg-white shadow-md border-2 border-indigo-200 dark:bg-zinc-700 dark:border-indigo-500'
+                        : 'bg-slate-50 border border-slate-200 dark:bg-zinc-800 dark:border-zinc-700'
+                    }`;
+
+                const projectContent = (
+                    <div className={containerClasses}>
+                        <div onClick={(e) => handleSelectProject(project.id, e)} onDoubleClick={(e) => { e.stopPropagation(); setEditingProjectId(project.id); }} className={`flex items-center px-2.5 cursor-pointer group relative overflow-hidden ${isDoc ? 'h-[30px] py-0' : 'py-1.5'}`}>
+                            {isActive && <div className={`absolute left-0 top-0 bottom-0 ${isDoc ? 'w-[3px]' : 'w-1'} bg-indigo-600 dark:bg-indigo-500`} />}
+                            <div className="flex items-center gap-2 min-w-0 flex-1 z-10">
+                                <span onClick={(e) => !isDoc && toggleProjectFolder(project.id, e)} className={`${isDoc ? 'text-sm opacity-50' : 'text-base'} shrink-0 dark:text-zinc-300`}>{isDoc ? '📄' : (isExpanded ? '📂' : '📁')}</span>
+                                {editingProjectId === project.id ? (<input autoFocus className="w-full bg-white border border-indigo-400 rounded-[3px] px-1 text-[12px] font-bold outline-none dark:bg-zinc-700 dark:text-white" defaultValue={project.name} onBlur={(e) => handleProjectRename(project.id, e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleProjectRename(project.id, e.target.value)} />) : (
+                                    <div className="flex items-center min-w-0 flex-1 justify-between">
+                                        <span className={`text-[12px] truncate flex-1 mr-2 ${isActive ? 'text-slate-900 font-black dark:text-white' : 'text-slate-500 font-semibold dark:text-zinc-400'}`}>{project.name}</span>
+                                        {isExpanded && !isDoc && (
+                                            <div className="flex items-center gap-0.5 bg-slate-200 dark:bg-zinc-900 p-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                                {[1, 2, 3, 4].map(col => (
+                                                    <button
+                                                        key={col}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setSidebarCols(project.id, col);
+                                                        }}
+                                                        className={`w-5 h-5 flex items-center justify-center text-[10px] font-black rounded-sm transition-colors ${cols === col
+                                                            ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-white shadow-sm'
+                                                            : 'text-slate-400 hover:bg-white/50 dark:text-zinc-500 dark:hover:bg-zinc-700/50'
+                                                            }`}
+                                                        title={`${col}열 보기`}
+                                                    >
+                                                        {col}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className="flex items-center shrink-0">
+                                            {isDoc && <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-[3px] ${getStatusBadgeStyle(project.status || '초고')}`}>{project.status || '초고'}</span>}
+                                            <button onClick={(e) => deleteProject(project.id, e)} className="w-0 opacity-0 group-hover:w-5 group-hover:opacity-100 group-hover:ml-1.5 overflow-hidden flex items-center justify-center text-slate-400 hover:text-red-500 transition-all duration-300 scale-90 dark:text-zinc-500 dark:hover:text-red-400"><IconTrash className="w-3 h-3" /></button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        {!isDoc && (
+                            (isExpanded && project.type === 'board') && (
+                                <div className="overflow-hidden bg-slate-50/30 rounded-b-[3px] border-slate-100 dark:bg-zinc-800/30 dark:border-zinc-700">
+                                    <div className="pb-3 px-3 space-y-3 pt-2">                                                {(() => {
+                                        const cols = project.sidebarColumns || 1;
+                                        return ALL_NODE_TYPES.map(type => {
+                                            const filtered = (project.nodes || []).filter(n => n.type === type); if (filtered.length === 0) return null;
+                                            return (
+                                                <div key={type} className="pl-1">
+                                                    <div className="text-[9px] font-black text-slate-400 mb-1.5 px-2 uppercase tracking-tighter flex items-center gap-2"><span className="w-1 h-1 bg-slate-300 rounded-[3px] dark:bg-zinc-600"></span>{type}</div>
+                                                    {cols === 1 ? (
+                                                        <Reorder.Group axis="y" values={filtered} onReorder={(newOrder) => handleReorderNodes(type, newOrder)} className="space-y-1">
+                                                            {filtered.map(n => (
+                                                                <Reorder.Item
+                                                                    key={n.id}
+                                                                    value={n}
+                                                                    dragElastic={0.5}
+                                                                    transition={{ type: "tween", duration: 0.15 }}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleSelectProject(project.id);
+                                                                        setSelectedNodeIds(new Set([n.id]));
+                                                                        animateViewport({
+                                                                            x: -(n.x + CARD_W / 2) * scale + (window.innerWidth - 320) / 2,
+                                                                            y: -(n.y + CARD_H / 2) * scale + window.innerHeight / 2
+                                                                        }, scale);
+                                                                    }}
+                                                                    onDoubleClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setSelectedNodeIds(new Set());
+                                                                        setSelectedNodeId(n.id);
+                                                                    }}
+                                                                    className={`group/node py-1.5 px-3 bg-white hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-zinc-700/80 rounded-[3px] flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing shadow-sm transition-colors border-l-4 dark:bg-zinc-800/90 dark:border-zinc-700 ${getSidebarItemAccent(n)} ${(selectedNodeIds.has(n.id) || selectedNodeId === n.id) ? `border-2 ${getSelectedBorderColor(n)}` : 'border-2 border-slate-200 dark:border-zinc-700'}`}
+                                                                >
+                                                                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                                                                        <span className="text-xs shrink-0">{n.data.emoji}</span>
+                                                                        <span className="text-[11px] font-bold text-slate-600 truncate dark:text-zinc-300">{n.label}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center shrink-0">
+                                                                        {n.type === '인물' && (
+                                                                            <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-[3px] shrink-0 ${getRoleBadgeStyle(n.data.role)}`}>
+                                                                                {n.data.role}
+                                                                            </span>
+                                                                        )}
+                                                                        <button
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                if (confirm(`'${n.label}'을(를) 삭제하시겠습니까?`)) deleteNode(n.id);
+                                                                            }}
+                                                                            className="w-0 opacity-0 group-hover/node:w-5 group-hover/node:opacity-100 group-hover/node:ml-1.5 overflow-hidden flex items-center justify-center text-slate-400 hover:text-red-500 transition-all duration-300 scale-90 dark:text-zinc-500 dark:hover:text-red-400"
+                                                                        >
+                                                                            <IconTrash className="w-3 h-3" />
+                                                                        </button>
+                                                                    </div>
+                                                                </Reorder.Item>
+                                                            ))}
+                                                        </Reorder.Group>
+                                                    ) : (
+                                                        <div className={`grid gap-1 ${cols === 4 ? 'grid-cols-4' : cols === 3 ? 'grid-cols-3' : cols === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                                            {filtered.map(n => (
+                                                                <div
+                                                                    key={n.id}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleSelectProject(project.id);
+                                                                        setSelectedNodeIds(new Set([n.id]));
+                                                                        animateViewport({
+                                                                            x: -(n.x + CARD_W / 2) * scale + (window.innerWidth - 320) / 2,
+                                                                            y: -(n.y + CARD_H / 2) * scale + window.innerHeight / 2
+                                                                        }, scale);
+                                                                    }}
+                                                                    onDoubleClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setSelectedNodeIds(new Set());
+                                                                        setSelectedNodeId(n.id);
+                                                                    }}
+                                                                    className={`group/node py-1.5 px-2 bg-white hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-zinc-700/80 rounded-[3px] flex items-center gap-1.5 cursor-pointer shadow-sm transition-colors border-l-4 dark:bg-zinc-800/90 dark:border-zinc-700 ${getSidebarItemAccent(n)} ${(selectedNodeIds.has(n.id) || selectedNodeId === n.id) ? `border-2 ${getSelectedBorderColor(n)}` : 'border-2 border-slate-200 dark:border-zinc-700'}`}
+                                                                >
+                                                                    {cols !== 4 && <span className="text-xs shrink-0">{n.data.emoji}</span>}
+                                                                    <span className={`font-bold text-slate-600 truncate dark:text-zinc-300 flex-1 min-w-0 ${cols === 4 ? 'text-[9px]' : 'text-[10px]'}`}>{n.label}</span>
+                                                                    {cols === 2 && n.type === '인물' && n.data.role && (
+                                                                        <span className={`text-[7px] font-black px-1 py-0.5 rounded-[3px] shrink-0 ${getRoleBadgeStyle(n.data.role)}`}>
+                                                                            {n.data.role}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        });
+                                    })()}
+                                    </div>
+                                </div>
+                            )
+                        )}
+                    </div>
+                );
+
+                if (isDoc) {
+                    return projectContent;
+                }
+
+                return (
+                    <Reorder.Item
+                        key={project.id}
+                        value={project}
+                        dragElastic={0}
+                        transition={{ duration: 0 }}
+                        className="cursor-grab active:cursor-grabbing"
+                    >
+                        {projectContent}
+                    </Reorder.Item>
+                );
+            };
+
+            if (!activeProject) return null;
+
+            return (
+                <div className={`flex w-full h-full overflow-hidden no-drag transition-colors duration-500 ${isTrashOpen ? 'bg-[#f8fafc] dark:bg-[#09080B]' : (activeProject.type === 'board' ? 'grid-background' : 'dot-background')} ${(isPanning || draggingNodeId) ? 'is-dragging' : ''}`} onMouseMove={handleGlobalMouseMove} onMouseUp={handleGlobalMouseUp} onContextMenu={e => { if (e.target.closest('input, textarea, [contenteditable="true"], select')) return; e.preventDefault(); }}>
+                    {showSystemSettings && (
+                        <SystemSettingsModal
+                            onClose={() => setShowSystemSettings(false)}
+                            user={user}
+                            onLogin={onLogin}
+                            onLogout={onLogout}
+                            isDarkMode={isDarkMode}
+                            toggleDarkMode={toggleDarkMode}
+                            fontMode={fontMode}
+                            toggleFont={toggleFont}
+                            setFontMode={setFontMode}
+                            activeProject={activeProject}
+                            onUpdateProject={(updated) => {
+                                setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+                            }}
+                            focusPosition={focusPosition}
+                            setFocusPosition={setFocusPosition}
+                            defaultTargetCount={defaultTargetCount}
+                            setDefaultTargetCount={setDefaultTargetCount}
+                            editorWidth={editorWidth}
+                            setEditorWidth={setEditorWidth}
+                            editorFontSize={editorFontSize}
+                            setEditorFontSize={setEditorFontSize}
+                            showDocWordCount={showDocWordCount}
+                            setShowDocWordCount={setShowDocWordCount}
+                            enableHistory={enableHistory}
+                            setEnableHistory={setEnableHistory}
+                            cloudAutoSaveInterval={cloudAutoSaveInterval}
+                            setCloudAutoSaveInterval={setCloudAutoSaveInterval}
+                            nickname={nickname}
+                            setNickname={setNickname}
+                        />
+                    )}
+                    
+                    <aside className={`workspace-sidebar h-full bg-[#f5f5f5] border-r border-slate-200 z-[100] flex flex-col shadow-2xl overflow-hidden dark:bg-[#141417] dark:border-zinc-700/50 transition-all duration-500 ease-in-out ${isZenMode ? 'w-0 -translate-x-full opacity-0' : (isSidebarOpen ? 'w-80 opacity-100' : 'w-0 -translate-x-full opacity-0')
+                        }`} style={{ borderRadius: 0 }}>
+
+                        <div className="w-full bg-slate-800 rounded-none">
+                            <div
+                                onClick={onExit}
+                                className="w-full py-2 px-5 flex items-center gap-3 transition-all duration-300 cursor-pointer hover:bg-slate-700"
+                            >
+                                <div className="w-4 h-4 bg-white/10 flex items-center justify-center transition-all">
+                                    <IconBack className="w-4 h-4 text-slate-400" />
+                                </div>
+                                <div className="flex flex-col items-start">
+                                    <span className="text-[12px] text-slate-400 tracking-tight">내 서재로 돌아가기</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            className="px-6 pt-6 pb-5 border-b border-slate-200/60 dark:border-zinc-800/60"
+                            style={{
+                                backgroundColor: isDarkMode ? `${currentBook.color}12` : `${currentBook.color}22`,
+                            }}
+                        >
+                            <div className="text-left">
+                                <h1 className="text-xl font-black text-slate-800 dark:text-zinc-100 tracking-tighter leading-tight">
+                                    {currentBook.title}
+                                </h1>
+
+                                <div className="flex items-center gap-2 mt-2 opacity-60">
+                                    <span className="text-[11px] font-bold text-slate-500 dark:text-zinc-400 tracking-wide">
+                                        {currentBook.author || '작가 미상'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+
+                        <div className="flex-1 overflow-y-auto px-3 pt-4 custom-scroll pb-10">
+                            <div className="mb-5 mobile-hide">
+                                <div className="flex items-center justify-between mb-2 px-1">
+                                    <div 
+                                        onClick={() => {
+                                            const firstBoard = projects.find(p => p.type === 'board');
+                                            if (firstBoard) {
+                                                handleSelectProject(firstBoard.id);
+                                                setCorkboardMode(false);
+                                            }
+                                        }}
+                                        className={`text-[9px] font-black px-2 py-1 rounded-[2px] tracking-widest uppercase border inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${activeProject?.type === 'board' && !corkboardMode && !isTrashOpen ? 'bg-indigo-50 text-indigo-600 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50' : 'bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-500 border-slate-200/50 dark:border-zinc-700/30 hover:bg-slate-200 dark:hover:bg-zinc-700'}`}
+                                    >
+                                        <span className={`w-1.5 h-1.5 rounded-full ${activeProject?.type === 'board' && !corkboardMode && !isTrashOpen ? 'bg-indigo-500 animate-pulse' : 'bg-slate-400'}`}></span>
+                                        <span>아이디어 보드 ({projects.filter(p => p.type === 'board').length})</span>
+                                    </div>
+                                    <button onClick={createNewProject} className="text-slate-400 hover:text-indigo-600 transition-colors p-1" title="새 보드 추가">
+                                        <IconPlus className="w-4 h-4" />
+                                    </button>
+                                </div>
+                                <Reorder.Group axis="y" values={projects.filter(p => p.type === 'board')} onReorder={handleReorderBoards} className="space-y-1">
+                                    {projects.filter(p => p.type === 'board').map(project => renderProjectItem(project))}
+                                </Reorder.Group>
+                            </div>
+                            <div>
+                                <div className="flex items-center justify-between mb-2 px-1 group h-7">
+                                    <div className="flex gap-1 items-center">
+                                        <div 
+                                            onClick={() => {
+                                                const firstDoc = projects.find(p => p.type === 'doc');
+                                                if (firstDoc) {
+                                                    handleSelectProject(firstDoc.id);
+                                                    setCorkboardMode(false);
+                                                }
+                                            }}
+                                            className={`text-[9px] font-black px-2 py-1 rounded-[2px] tracking-widest uppercase border inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${(activeProject?.type === 'doc' || compareMode) && !corkboardMode && !isTrashOpen ? 'bg-indigo-50 text-indigo-600 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50' : 'bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-500 border-slate-200/50 dark:border-zinc-700/30 hover:bg-slate-200 dark:hover:bg-zinc-700'}`}
+                                            title="문서함"
+                                        >
+                                            <span className={`w-1.5 h-1.5 rounded-full ${(activeProject?.type === 'doc' || compareMode) && !corkboardMode && !isTrashOpen ? 'bg-indigo-500 animate-pulse' : 'bg-slate-400'}`}></span>
+                                            <span>{compareMode ? '비교 모드' : `문서함 (${projects.filter(p => p.type === 'doc').length})`}</span>
+                                        </div>
+                                        <div 
+                                            onClick={() => { setCorkboardMode(true); setCompareMode(false); setActiveProjectId(null); }}
+                                            className={`text-[9px] font-black px-2 py-1 rounded-[2px] tracking-widest uppercase border inline-flex items-center justify-center cursor-pointer transition-colors ${corkboardMode ? 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/50' : 'bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-500 border-slate-200/50 dark:border-zinc-700/30 hover:bg-slate-200 dark:hover:bg-zinc-700'}`}
+                                            title="코르크 보드 모드"
+                                        >
+                                            <span>코르크보드</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        {/* 문서 필터 버튼 (회색/검은 배경 스타일) */}
+                                        <div className="w-0 group-hover:w-[95px] overflow-hidden transition-all duration-500 ease-in-out">
+                                            <div className="flex items-center gap-0.5 bg-slate-200 dark:bg-zinc-900 p-0.5 rounded-sm min-w-[95px] opacity-0 translate-x-8 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-500">
+                                                {['초고', '수정', '완료'].map(filter => (
+                                                    <button
+                                                        key={filter}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setDocFilter(prev => prev === filter ? null : filter);
+                                                        }}
+                                                        className={`shrink-0 px-1.5 py-0.5 text-[9px] font-black rounded-sm transition-colors whitespace-nowrap ${docFilter === filter
+                                                            ? (filter === '완료' ? 'bg-emerald-600 text-white shadow-sm' :
+                                                                filter === '수정' ? 'bg-amber-100 text-amber-600 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800' :
+                                                                    'bg-white text-slate-600 dark:bg-zinc-700 dark:text-zinc-300 shadow-sm')
+                                                            : 'text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-white'
+                                                            }`}
+                                                    >
+                                                        {filter}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <button onClick={createNewDoc} className="text-slate-400 hover:text-indigo-600 transition-colors shrink-0 p-1" title="새 문서 추가">
+                                            <IconPlus className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                                <Reorder.Group axis="y" values={projects.filter(p => p.type === 'doc')} onReorder={handleReorderDocs} className="space-y-0 border-t border-slate-200/50 dark:border-zinc-700/50">
+                                    {projects.filter(p => p.type === 'doc').filter(p => docFilter === null || (p.status || '초고') === docFilter).map(project => {
+                                        const isActive = !isTrashOpen && activeProjectId === project.id;
+                                        return (
+                                            <Reorder.Item
+                                                key={project.id}
+                                                value={project}
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: 1 }}
+                                                exit={{ opacity: 0 }}
+                                                layoutId={`doc-${project.id}`}
+                                                dragElastic={0.5}
+                                                transition={{ type: "tween", duration: 0.15 }}
+                                                whileDrag={{ scale: 1.02, boxShadow: '0 5px 15px rgba(0,0,0,0.1)', zIndex: 100 }}
+                                                onClick={(e) => handleSelectProject(project.id, e)}
+                                                onDoubleClick={(e) => { e.stopPropagation(); setEditingProjectId(project.id); }}
+                                                className={`border-b border-slate-200/50 dark:border-zinc-700/50 last:border-0 cursor-grab active:cursor-grabbing ${isActive ? 'bg-white dark:bg-zinc-700' : (compareMode && compareDocIds.includes(project.id)) ? 'bg-indigo-50 dark:bg-indigo-900/20 ring-1 ring-indigo-300 dark:ring-indigo-700' : 'hover:bg-slate-200/50 dark:hover:bg-zinc-700/50'}`}
+                                            >
+                                                <div className="flex items-center px-4 h-[30px] py-0 group relative overflow-hidden">
+                                                    {isActive && <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-indigo-600 dark:bg-indigo-500" />}
+                                                    <div className="flex items-center gap-2.5 min-w-0 flex-1 z-10">
+                                                        <span className="text-sm opacity-50 shrink-0 dark:text-zinc-300">📄</span>
+                                                        {editingProjectId === project.id ? (
+                                                            <input
+                                                                autoFocus
+                                                                className="w-full bg-white border border-indigo-400 rounded-[3px] px-1 text-[12px] font-bold outline-none dark:bg-zinc-700 dark:text-white"
+                                                                defaultValue={project.name}
+                                                                onBlur={(e) => handleProjectRename(project.id, e.target.value)}
+                                                                onKeyDown={(e) => e.key === 'Enter' && handleProjectRename(project.id, e.target.value)}
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            />
+                                                        ) : (
+                                                            <div className="flex items-center min-w-0 flex-1 justify-between">
+                                                                <span className={`text-[12px] truncate flex-1 mr-2 ${isActive ? 'text-slate-900 font-black dark:text-white' : 'text-slate-500 font-semibold dark:text-zinc-400'}`}>{project.name}</span>
+                                                                {showDocWordCount && <span className="text-[10px] text-slate-400/90 dark:text-zinc-500/90 font-medium shrink-0 mr-1.5">{(project.content || '').length.toLocaleString()}자</span>}
+                                                                <div className="flex items-center shrink-0">
+                                                                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-[3px] ${getStatusBadgeStyle(project.status || '초고')}`}>{project.status || '초고'}</span>
+                                                                    <button onClick={(e) => deleteProject(project.id, e)} className="w-0 opacity-0 group-hover:w-5 group-hover:opacity-100 group-hover:ml-1.5 overflow-hidden flex items-center justify-center text-slate-400 hover:text-red-500 transition-all duration-300 scale-90 dark:text-zinc-500 dark:hover:text-red-400"><IconTrash className="w-3 h-3" /></button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </Reorder.Item>
+                                        );
+                                    })}
+                                </Reorder.Group>
+                            </div>
+                                                </div>
+                                                                        <div className="shrink-0 border-t border-slate-200 dark:border-zinc-700 bg-white dark:bg-[#161618]">
+                                                                            <button
+                                                                                onClick={() => { setIsTrashOpen(true); setCorkboardMode(false); setActiveProjectId(null); }}
+                                                                                className={`w-full px-5 py-2 flex items-center justify-between transition-colors ${isTrashOpen ? 'bg-slate-100 dark:bg-zinc-700' : 'hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
+                                                                            >
+                                                                                <div className="flex items-center gap-2 text-slate-500 dark:text-zinc-400">
+                                                                                    <IconTrash className="w-4 h-4" />
+                                                                                    <span className="text-[11px] font-bold">휴지통</span>
+                                                                                    {trash.length > 0 && (
+                                                                                        <span className="text-[9px] bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 px-1.5 py-0.5 rounded-full font-bold">{trash.length}</span>
+                                                                                    )}
+                                                                                </div>
+                                                                                <svg className="w-3 h-3 text-slate-400 dark:text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                                                </svg>
+                                                                            </button>
+                                                                        </div>
+                                            </aside>
+                        
+                                            <main
+                                                className={`flex-1 relative overflow-hidden transition-all duration-500 ease-in-out ${activeProject?.type === 'board' ? (isPanning || isMarqueeSelectingRef.current ? 'cursor-grabbing' : draggingNodeId ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+                                                ref={containerRef}
+                                                onMouseDown={(e) => {
+                                                    if (activeProject?.type === 'board' && !corkboardMode) {
+                                                        if (rAF.current) { cancelAnimationFrame(rAF.current); rAF.current = null; }
+                                                        lastMousePos.current = { x: e.clientX, y: e.clientY };
+                                                        latestMousePos.current = { x: e.clientX, y: e.clientY };
+                        
+                                                        if (e.shiftKey && e.button === 0) {
+                                                            isMarqueeSelectingRef.current = true;
+                                                            const startCoords = getCanvasCoords(e.clientX, e.clientY);
+                                                            setMarquee({ x: startCoords.x, y: startCoords.y, width: 0, height: 0, startX: startCoords.x, startY: startCoords.y });
+                                                        } else if (e.button === 0) {
+                                                            setIsPanning(true);
+                                                            if (!e.shiftKey) {
+                                                                setSelectedNodeIds(new Set());
+                                                                setSelectedNodeId(null);
+                                                            }
+                                                        }
+                                                    }
+                                                }}
+                                            >
+                                                {/* 상단 공통 도구 (집중모드 & 뽀모도로 시계 세로 배치) */}
+                                                <div className="fixed top-6 right-6 sm:right-8 md:right-10 z-[110] flex flex-col items-end gap-2 pointer-events-none">
+                                                    <div className="flex flex-col items-center gap-2 pointer-events-auto">
+                                                        {/* 집중모드 버튼 */}
+                                                        <div className={`flex items-center rounded-full shadow-xl border transition-all ${isZenMode ? "bg-indigo-600 border-indigo-500 shadow-indigo-500/20" : "bg-white text-slate-400 border-slate-200 hover:text-indigo-600 dark:bg-zinc-800 dark:border-zinc-700"}`}>
+                                                            <button
+                                                                onClick={() => {
+                                                                    if (isSidebarOpen && !isZenMode) {
+                                                                        setIsSidebarOpen(false);
+                                                                        setIsZenMode(false);
+                                                                    } else if (!isSidebarOpen && !isZenMode) {
+                                                                        setIsSidebarOpen(false);
+                                                                        setIsZenMode(true);
+                                                                    } else {
+                                                                        setIsSidebarOpen(true);
+                                                                        setIsZenMode(false);
+                                                                    }
+                                                                }}
+                                                                className={`flex items-center justify-center gap-2 h-8 w-8 rounded-full text-[12px] font-black tracking-widest transition-all ${isZenMode ? "text-white" : "text-slate-400 hover:text-indigo-600"}`}
+                                                                title={compareMode ? '현재 활성 패널 집중 모드' : '집중 모드 (Ctrl+J)'}
+                                                            >
+                                                                <IconZen className={`w-4 h-4 ${isZenMode ? "animate-spin" : ""}`} style={{ animationDuration: "3s" }} />
+                                                            </button>
+                                                        </div>
+
+                                                        {/* 뽀모도로 시계 버튼 (집중모드 버튼 바로 아래) */}
+                                                        <button
+                                                            onClick={() => setIsPomodoroOpen(!isPomodoroOpen)}
+                                                            className={`flex items-center justify-center w-8 h-8 rounded-full shadow-xl border transition-all ${isPomodoroOpen ? "bg-indigo-600 border-indigo-500 text-white" : "bg-white border-slate-200 hover:border-indigo-300 dark:bg-zinc-800 dark:border-zinc-700"}`}
+                                                            title="뽀모도로 타이머"
+                                                        >
+                                                            {!isPomodoroOpen && isPomoActive ? (
+                                                                <div className="relative w-6 h-6">
+                                                                    <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                                                                        <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-100 dark:text-zinc-700" />
+                                                                        <circle
+                                                                            cx="50" cy="50" r="22.5"
+                                                                            fill="none"
+                                                                            stroke="#ef4444"
+                                                                            strokeWidth="45"
+                                                                            strokeDasharray={2 * Math.PI * 22.5}
+                                                                            style={{
+                                                                                strokeDashoffset: (2 * Math.PI * 22.5) * (pomoRemaining / pomoInitialTotal),
+                                                                                transition: isPomoActive ? 'stroke-dashoffset 1s linear' : 'none',
+                                                                            }}
+                                                                            className="opacity-90"
+                                                                        />
+                                                                    </svg>
+                                                                </div>
+                                                            ) : (
+                                                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={isPomodoroOpen ? 'text-white' : 'text-slate-400'}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                                                            )}
+                                                        </button>
+                                                    </div>
+                                                    {/* 뽀모도로 타이머 설정창 */}
+                                                    <AnimatePresence>
+                                                        {isPomodoroOpen && (
+                                                            <PomodoroTimer
+                                                                minutes={pomoMinutes} setMinutes={setPomoMinutes}
+                                                                seconds={pomoSeconds} setSeconds={setPomoSeconds}
+                                                                isActive={isPomoActive} setIsActive={setIsPomoActive}
+                                                                initialTotal={pomoInitialTotal} setInitialTotal={setPomoInitialTotal}
+                                                                remaining={pomoRemaining} setRemaining={setPomoRemaining}
+                                                                isSetting={isPomoSetting} setIsSetting={setIsPomoSetting}
+                                                                showToast={showToast}
+                                                            />
+                                                        )}
+                                                    </AnimatePresence>
+                                                </div>
+                        
+                                                                                                {corkboardMode ? (
+                                                                                                    /* 코르크보드 모드 뷰 */
+                                                                                                    <div className="w-full h-full overflow-y-auto custom-scroll p-10 dot-background">
+                                                                                                        <div className="max-w-7xl mx-auto py-12">
+                                                                                                            {/* 헤더 */}
+                                                                                                            <div className="flex items-center justify-between mb-8">
+                                                                                                                <div className="flex items-center gap-4">
+                                                                                                                    <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-xl flex items-center justify-center">
+                                                                                                                        <span className="text-2xl">📌</span>
+                                                                                                                    </div>
+                                                                                                                    <div>
+                                                                                                                        <h2 className="text-2xl font-black text-slate-800 dark:text-zinc-100">코르크 보드</h2>
+                                                                                                                        <span className="text-sm text-slate-400 dark:text-zinc-500">{projects.filter(p => p.type === 'doc').length}개 문서</span>
+                                                                                                                    </div>
+                                                                                                                </div>
+                                                                                                                
+                                                                                                                                                                                                <div className="hidden xl:flex items-center gap-3">
+                                                                                                                                                                                                                                                                                        {/* 통합 검색 및 이동 입력 */}
+                                                                                                                                                                                                                                                                                        <div className="flex items-center bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-lg px-3 h-9 shadow-sm gap-2 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition-all">
+                                                                                                                                                                                                                                                                                            {corkboardSearch.startsWith('#') ? (
+                                                                                                                                                                                                                                                                                                <button 
+                                                                                                                                                                                                                                                                                                    onClick={() => {
+                                                                                                                                                                                                                                                                                                        const num = parseInt(corkboardSearch.substring(1));
+                                                                                                                                                                                                                                                                                                        const cards = document.querySelectorAll('.corkboard-card');
+                                                                                                                                                                                                                                                                                                        if (num > 0 && num <= cards.length) {
+                                                                                                                                                                                                                                                                                                            cards[num-1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                                                                                                                                                                                                                                                                            cards[num-1].classList.add('ring-4', 'ring-indigo-500', 'ring-offset-4', 'dark:ring-offset-zinc-900');
+                                                                                                                                                                                                                                                                                                            setTimeout(() => cards[num-1].classList.remove('ring-4', 'ring-indigo-500', 'ring-offset-4', 'dark:ring-offset-zinc-900'), 2000);
+                                                                                                                                                                                                                                                                                                            setCorkboardSearch('');
+                                                                                                                                                                                                                                                                                                        } else {
+                                                                                                                                                                                                                                                                                                            showToast("유효하지 않은 번호입니다", "error");
+                                                                                                                                                                                                                                                                                                        }
+                                                                                                                                                                                                                                                                                                    }}
+                                                                                                                                                                                                                                                                                                    className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded hover:bg-indigo-100 transition-colors shrink-0"
+                                                                                                                                                                                                                                                                                                >
+                                                                                                                                                                                                                                                                                                    GO
+                                                                                                                                                                                                                                                                                                </button>
+                                                                                                                                                                                                                                                                                            ) : (
+                                                                                                                                                                                                                                                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="text-slate-400 shrink-0"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+                                                                                                                                                                                                                                                                                            )}
+                                                                                                                                                                                                                                                                                            <input 
+                                                                                                                                                                                                                                                                                                type="text" 
+                                                                                                                                                                                                                                                                                                placeholder="제목 검색 또는 #번호 이동..." 
+                                                                                                                                                                                                                                                                                                className="bg-transparent border-none outline-none text-xs font-bold text-slate-700 dark:text-zinc-200 w-48"
+                                                                                                                                                                                                                                                                                                value={corkboardSearch}
+                                                                                                                                                                                                                                                                                                onChange={(e) => setCorkboardSearch(e.target.value)}
+                                                                                                                                                                                                                                                                                                onKeyDown={(e) => {
+                                                                                                                                                                                                                                                                                                    if (e.key === 'Enter' && corkboardSearch.startsWith('#')) {
+                                                                                                                                                                                                                                                                                                        const num = parseInt(corkboardSearch.substring(1));
+                                                                                                                                                                                                                                                                                                        const cards = document.querySelectorAll('.corkboard-card');
+                                                                                                                                                                                                                                                                                                        if (num > 0 && num <= cards.length) {
+                                                                                                                                                                                                                                                                                                            cards[num-1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                                                                                                                                                                                                                                                                            cards[num-1].classList.add('ring-4', 'ring-indigo-500', 'ring-offset-4', 'dark:ring-offset-zinc-900');
+                                                                                                                                                                                                                                                                                                            setTimeout(() => cards[num-1].classList.remove('ring-4', 'ring-indigo-500', 'ring-offset-4', 'dark:ring-offset-zinc-900'), 2000);
+                                                                                                                                                                                                                                                                                                            setCorkboardSearch('');
+                                                                                                                                                                                                                                                                                                        } else {
+                                                                                                                                                                                                                                                                                                            showToast("유효하지 않은 번호입니다", "error");
+                                                                                                                                                                                                                                                                                                        }
+                                                                                                                                                                                                                                                                                                    }
+                                                                                                                                                                                                                                                                                                }}
+                                                                                                                                                                                                                                                                                            />
+                                                                                                                                                                                                                                                                                            {corkboardSearch && (
+                                                                                                                                                                                                                                                                                                <button onClick={() => setCorkboardSearch('')} className="text-slate-300 hover:text-slate-500">
+                                                                                                                                                                                                                                                                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                                                                                                                                                                                                                                                                                </button>
+                                                                                                                                                                                                                                                                                            )}
+                                                                                                                                                                                                                                                                                        </div>                                                                                                                
+                                                                                                                                                                                                    {/* 접고 펼칠 수 있는 필터 */}
+                                                                                                                                                                                                    <div 
+                                                                                                                                                                                                        className="flex items-center bg-slate-100 dark:bg-zinc-900 p-1 rounded-lg border border-slate-200 dark:border-zinc-800 h-9 transition-all duration-300 ease-in-out overflow-hidden"
+                                                                                                                                                                                                        onClick={() => !isCorkboardFilterOpen && setIsCorkboardFilterOpen(true)}
+                                                                                                                                                                                                    >
+                                                                                                                                                                                                        <div 
+                                                                                                                                                                                                            className="flex items-center gap-1 cursor-pointer px-1"
+                                                                                                                                                                                                            onClick={(e) => {
+                                                                                                                                                                                                                e.stopPropagation();
+                                                                                                                                                                                                                setIsCorkboardFilterOpen(!isCorkboardFilterOpen);
+                                                                                                                                                                                                            }}
+                                                                                                                                                                                                        >
+                                                                                                                                                                                                            <div className={`p-1 rounded transition-colors ${isCorkboardFilterOpen ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40' : 'text-slate-400'}`}>
+                                                                                                                                                                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" /></svg>
+                                                                                                                                                                                                            </div>
+                                                                                                                                                                                                        </div>
+                                                                                                                
+                                                                                                                                                                                                        <div className={`flex transition-all duration-500 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${isCorkboardFilterOpen ? 'max-w-[300px] opacity-100 ml-1' : 'max-w-0 opacity-0 ml-0'}`}>
+                                                                                                                                                                                                            {['초고', '수정', '완료'].map(status => {
+                                                                                                                                                                                                                const isActive = corkboardStatusFilter === status;
+                                                                                                                                                                                                                let activeClass = '';
+                                                                                                                                                                                                                
+                                                                                                                                                                                                                if (isActive) {
+                                                                                                                                                                                                                    if (status === '수정') activeClass = 'bg-amber-100 text-amber-600 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-800 shadow-sm';
+                                                                                                                                                                                                                    else if (status === '완료') activeClass = 'bg-emerald-600 text-white shadow-sm';
+                                                                                                                                                                                                                    else activeClass = 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-400 shadow-sm';
+                                                                                                                                                                                                                }
+                                                                                                                
+                                                                                                                                                                                                                return (
+                                                                                                                                                                                                                    <button
+                                                                                                                                                                                                                        key={status}
+                                                                                                                                                                                                                        onClick={(e) => {
+                                                                                                                                                                                                                            e.stopPropagation();
+                                                                                                                                                                                                                            setCorkboardStatusFilter(prev => prev === status ? null : status);
+                                                                                                                                                                                                                        }}
+                                                                                                                                                                                                                        className={`px-3 h-7 flex items-center justify-center text-[10px] font-black rounded-md transition-all whitespace-nowrap mx-0.5 ${isActive 
+                                                                                                                                                                                                                            ? activeClass 
+                                                                                                                                                                                                                            : 'text-slate-400 hover:text-slate-600 dark:text-zinc-500'}`}
+                                                                                                                                                                                                                    >
+                                                                                                                                                                                                                        {status}
+                                                                                                                                                                                                                    </button>
+                                                                                                                                                                                                                );
+                                                                                                                                                                                                            })}
+                                                                                                                                                                                                        </div>
+                                                                                                                                                                                                    </div>
+                                                                                                                
+                                                                                                                                                                                                    <button
+                                                                                                                                                                                                        onClick={createNewDoc}                                                                                                                        className="px-5 h-9 text-[11px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:hover:bg-indigo-900/40 dark:text-indigo-400 rounded-lg transition-colors border border-indigo-200 dark:border-indigo-800 flex items-center gap-2 shadow-sm"
+                                                                                                                    >
+                                                                                                                        <IconPlus className="w-4 h-4" />
+                                                                                                                        새 문서
+                                                                                                                    </button>
+                                                                                                                </div>
+                                                                                                            </div>
+
+                                                                                                                                                                                        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+                                                                                                                                                                                            {projects
+                                                                                                                                                                                                .filter(p => p.type === 'doc')
+                                                                                                                                                                                                .filter(p => !corkboardStatusFilter || (p.status || '초고') === corkboardStatusFilter)
+                                                                                                                                                                                                .filter(p => {
+                                                                                                                                                                                                    if (corkboardSearch.startsWith('#')) return true;
+                                                                                                                                                                                                    return p.name.toLowerCase().includes(corkboardSearch.toLowerCase());
+                                                                                                                                                                                                })
+                                                                                                                                                                                                .map((doc, idx) => (
+                                                                                                                                                                                                <motion.div
+                                                                                                                                                                                                    key={doc.id}
+                                                                                                                                                                                                    initial={{ opacity: 0 }}
+                                                                                                                                                                                                    animate={{ opacity: 1 }}
+                                                                                                                                                                                                    transition={{ duration: 0.1 }}
+                                                                                                                                                                                                    className="corkboard-card bg-white dark:bg-zinc-800 rounded-lg shadow-md border border-slate-200 dark:border-zinc-700 p-2 flex flex-col h-[300px] hover:shadow-xl group/card relative transition-all"
+                                                                                                                                                                                                >
+                                                                                                                                                                                                    {/* 인덱스 표시 */}
+                                                                                                                                                                                                    <div 
+                                                                                                                                                                                                        onClick={(e) => {
+                                                                                                                                                                                                            e.stopPropagation();
+                                                                                                                                                                                                            const cards = document.querySelectorAll('.corkboard-card');
+                                                                                                                                                                                                            cards[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                                                                                                                                                                            cards[idx].classList.add('ring-4', 'ring-indigo-500', 'ring-offset-4', 'dark:ring-offset-zinc-900');
+                                                                                                                                                                                                            setTimeout(() => cards[idx].classList.remove('ring-4', 'ring-indigo-500', 'ring-offset-4', 'dark:ring-offset-zinc-900'), 2000);
+                                                                                                                                                                                                        }}
+                                                                                                                                                                                                        className="absolute -top-2 -left-2 w-6 h-6 bg-slate-800 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-lg z-10 border-2 border-white dark:border-zinc-700 group-hover/card:bg-indigo-600 transition-colors cursor-pointer"
+                                                                                                                                                                                                        title="클릭하여 카드 강조"
+                                                                                                                                                                                                    >
+                                                                                                                                                                                                        {idx + 1}
+                                                                                                                                                                                                    </div>                                                                                                                        
+                                                                                                                        <div className="flex items-center justify-between mb-2 border-b border-slate-100 dark:border-zinc-700 pb-2 pl-4">
+                                                                                                                            <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
+                                                                                                                                <span className="text-lg shrink-0">📄</span>
+                                                                                                                                {corkboardEditingId === doc.id ? (
+                                                                                                                                    <input
+                                                                                                                                        autoFocus
+                                                                                                                                        type="text"
+                                                                                                                                        className="w-full bg-slate-50 border border-indigo-400 rounded-[3px] px-1 text-sm font-black outline-none dark:bg-zinc-700 dark:text-white"
+                                                                                                                                        defaultValue={doc.name}
+                                                                                                                                        onBlur={(e) => { setProjects(prev => prev.map(p => p.id === doc.id ? { ...p, name: e.target.value } : p)); setCorkboardEditingId(null); }}
+                                                                                                                                        onKeyDown={(e) => { if (e.key === 'Enter') { setProjects(prev => prev.map(p => p.id === doc.id ? { ...p, name: e.target.value } : p)); setCorkboardEditingId(null); } }}
+                                                                                                                                        onClick={(e) => e.stopPropagation()}
+                                                                                                                                    />
+                                                                                                                                ) : (
+                                                                                                                                    <span
+                                                                                                                                        onDoubleClick={() => setCorkboardEditingId(doc.id)}
+                                                                                                                                        className="font-black text-slate-800 dark:text-zinc-100 truncate text-sm cursor-pointer hover:text-slate-500 dark:hover:text-zinc-400 transition-colors"
+                                                                                                                                        title="더블클릭하여 제목 수정"
+                                                                                                                                    >
+                                                                                                                                        {doc.name}
+                                                                                                                                    </span>
+                                                                                                                                )}
+                                                                                                                            </div>
+                                                                                                                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-[2px] shrink-0 ${getStatusBadgeStyle(doc.status || '초고')}`}>{doc.status || '초고'}</span>
+                                                                                                                        </div>
+                                                                                                                        <div className="flex-1 overflow-hidden mb-2 relative -mr-2">
+                                                                                                                            <textarea
+                                                                                                                                className="w-full h-full resize-none outline-none text-sm text-slate-600 dark:text-zinc-300 leading-relaxed bg-transparent border-none pr-2 placeholder:italic custom-scroll"
+                                                                                                                                placeholder="시놉시스를 입력하세요..."
+                                                                                                                                value={doc.synopsis || ''}
+                                                                                                                                onChange={(e) => setProjects(prev => prev.map(p => p.id === doc.id ? { ...p, synopsis: e.target.value } : p))}
+                                                                                                                                onMouseDown={(e) => e.stopPropagation()} 
+                                                                                                                                onWheel={(e) => {
+                                                                                                                                    const el = e.currentTarget;
+                                                                                                                                    if (el.scrollHeight > el.clientHeight) {
+                                                                                                                                        e.stopPropagation();
+                                                                                                                                    }
+                                                                                                                                }}
+                                                                                                                            />
+                                                                                                                        </div>
+                                                                                                                        <div className="pt-2 border-t border-slate-100 dark:border-zinc-700 flex justify-between items-center text-[10px] text-slate-400 dark:text-zinc-500">
+                                                                                                                            <span>{(doc.content || "").length.toLocaleString()}자</span>
+                                                                                                                            <button 
+                                                                                                                                onClick={(e) => {
+                                                                                                                                    e.stopPropagation();
+                                                                                                                                    setCorkboardMode(false);
+                                                                                                                                    handleSelectProject(doc.id);
+                                                                                                                                }}
+                                                                                                                                className="hover:text-indigo-600 dark:hover:text-indigo-400 font-bold transition-colors"
+                                                                                                                            >
+                                                                                                                                바로가기 →
+                                                                                                                            </button>
+                                                                                                                        </div>
+                                                                                                                    </motion.div>
+                                                                                                                ))}
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    </div>
+                                                                                                ) : isTrashOpen ? (
+                                                                                                    /* 휴지통 메인 뷰 */
+                                                                                                    <div className="w-full h-full overflow-y-auto custom-scroll p-10 bg-slate-100 dark:bg-zinc-950">
+                                                                                                        <div className="max-w-7xl mx-auto py-12">
+                                                                                                            {/* 헤더 */}
+                                                                                                            <div className="flex items-center justify-between mb-8">
+                                                                                                                <div className="flex items-center gap-4">
+                                                                                                                    <div className="w-14 h-14 bg-red-50 dark:bg-red-900/20 rounded-xl flex items-center justify-center">
+                                                                                                                        <IconTrash className="w-7 h-7 text-red-500" />
+                                                                                                                    </div>
+                                                                                                                    <div>
+                                                                                                                        <h2 className="text-2xl font-black text-slate-800 dark:text-zinc-100">휴지통</h2>
+                                                                                                                        <span className="text-sm text-slate-400 dark:text-zinc-500">{trash.length}개 항목</span>
+                                                                                                                    </div>
+                                                                                                                </div>
+                                                                                                                {trash.length > 0 && (
+                                                                                                                    <button
+                                                                                                                        onClick={emptyTrash}
+                                                                                                                        className="px-5 py-2.5 text-[11px] font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors border border-red-200 dark:border-red-800"
+                                                                                                                    >
+                                                                                                                        휴지통 비우기
+                                                                                                                    </button>
+                                                                                                                )}
+                                                                                                            </div>
+
+                                                                                                            {/* 컨텐츠 - 카드 형식 */}
+                                                                                                            {trash.length === 0 ? (
+                                                                                                                <div className="h-[400px] flex flex-col items-center justify-center text-slate-400 dark:text-zinc-500">
+                                                                                                                    <IconTrash className="w-20 h-20 mb-6 opacity-20" />
+                                                                                                                    <p className="text-xl font-bold mb-2">휴지통이 비어있습니다</p>
+                                                                                                                    <p className="text-sm">삭제된 보드와 문서가 여기에 표시됩니다</p>
+                                                                                                                </div>
+                                                                                                            ) : (
+                                                                                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                                                                                                                    {trash.map(item => (
+                                                                                                                        <motion.div
+                                                                                                                            key={item.id}
+                                                                                                                            initial={{ opacity: 0 }}
+                                                                                                                            animate={{ opacity: 1 }}
+                                                                                                                            exit={{ opacity: 0 }}
+                                                                                                                            transition={{ duration: 0.15 }}
+                                                                                                                            className="group bg-white dark:bg-zinc-800 rounded-lg p-3 border border-slate-200 dark:border-zinc-700 hover:border-slate-300 dark:hover:border-zinc-600 hover:shadow-lg transition-all"
+                                                                                                                        >
+                                                                                                                            <div className="flex items-start justify-between mb-3">
+                                                                                                                                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                                                                                                                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-base shrink-0 ${item.type === 'board' ? 'bg-indigo-100 dark:bg-indigo-900/30' : 'bg-emerald-100 dark:bg-emerald-900/30'}`}>
+                                                                                                                                        {item.type === 'board' ? '📋' : '📄'}
+                                                                                                                                    </div>
+                                                                                                                                    <div className="min-w-0 flex-1">
+                                                                                                                                        <div className="flex justify-between items-start gap-2">
+                                                                                                                                            <h3 className="font-bold text-sm text-slate-800 dark:text-zinc-100 truncate flex-1">{item.name}</h3>
+                                                                                                                                            <span className="text-[12px] text-slate-400 dark:text-zinc-500 font-black shrink-0 mt-0.5 uppercase">
+                                                                                                                                                {item.type === 'board' ? `${item.nodes?.length || 0} 노드` : `${(item.content || '').length.toLocaleString()} 자`}
+                                                                                                                                            </span>
+                                                                                                                                        </div>
+                                                                                                                                        <span className="text-[9px] text-slate-400 dark:text-zinc-500 uppercase font-bold block mt-0.5">
+                                                                                                                                            {item.type === 'board' ? '보드' : '문서'}
+                                                                                                                                            {item.deletedAt && ` · ${new Date(item.deletedAt).toLocaleString('ko-KR', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}`}
+                                                                                                                                        </span>
+                                                                                                                                    </div>
+                                                                                                                                </div>
+                                                                                                                            </div>
+
+                                                                                                                            {/* 액션 버튼 */}
+                                                                                                                            <div className="flex gap-2 pt-2 border-t border-slate-50 dark:border-zinc-700/50">
+                                                                                                                                <button
+                                                                                                                                    onClick={() => restoreFromTrash(item.id)}
+                                                                                                                                    className="flex-1 py-1.5 px-3 text-[10px] font-bold text-emerald-600 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:hover:bg-emerald-900/40 dark:text-emerald-400 rounded-md transition-colors flex items-center justify-center gap-1.5"
+                                                                                                                                >
+                                                                                                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                                                                                                                                    </svg>
+                                                                                                                                    복원
+                                                                                                                                </button>
+                                                                                                                                <button
+                                                                                                                                    onClick={() => permanentDelete(item.id)}
+                                                                                                                                    className="py-1.5 px-3 text-[10px] font-bold text-red-500 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/40 dark:text-red-400 rounded-md transition-colors"
+                                                                                                                                    title="완전 삭제"
+                                                                                                                                >
+                                                                                                                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                                                                                                    </svg>
+                                                                                                                                </button>
+                                                                                                                            </div>
+                                                                                                                        </motion.div>
+                                                                                                                    ))}
+                                                                                                                </div>
+                                                                                                            )}
+                                                                                                        </div>
+                                                                                                    </div>
+
+                        ) : activeProject.type === 'board' ? (
+                            <>
+                                <div className="absolute top-6 left-6 z-[80] flex items-center gap-3" onMouseDown={(e) => e.stopPropagation()}>
+                                    <div className="h-10 px-5 bg-white shadow-lg border border-slate-200 rounded-[3px] flex items-center gap-2 dark:bg-darkpanel dark:border-darkborder dark:text-white">
+                                        <span className="w-2 h-2 bg-indigo-500 rounded-[3px] animate-pulse"></span>
+                                        <span className="text-xs font-black text-slate-800 uppercase tracking-widest dark:text-zinc-200">{activeProject.name}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1 p-1 bg-white rounded-[3px] shadow-lg border border-slate-200 h-10 dark:bg-darkpanel dark:border-darkborder">
+                                        <button onClick={() => addNode('인물')} className="flex items-center gap-2 h-full px-3 rounded-[3px] hover:bg-blue-50 text-blue-600 transition-all active:scale-95 group dark:hover:bg-zinc-700 dark:text-blue-400" title="인물 추가">
+                                            <span className="text-sm">👤</span>
+                                            <span className="text-[10px] font-black hidden sm:inline">인물</span>
+                                        </button>
+                                        <div className="w-px h-4 bg-slate-200 mx-0.5 dark:bg-zinc-600"></div>
+                                        <button onClick={() => addNode('사건')} className="flex items-center gap-2 h-full px-3 rounded-[3px] hover:bg-red-50 text-red-600 transition-all active:scale-95 group dark:hover:bg-zinc-700 dark:text-red-400" title="사건 추가">
+                                            <span className="text-sm">🔥</span>
+                                            <span className="text-[10px] font-black hidden sm:inline">사건</span>
+                                        </button>
+                                        <div className="w-px h-4 bg-slate-200 mx-0.5 dark:bg-zinc-600"></div>
+                                        <button onClick={() => addNode('메모')} className="flex items-center gap-2 h-full px-3 rounded-[3px] hover:bg-amber-50 text-amber-600 transition-all active:scale-95 group dark:hover:bg-zinc-700 dark:text-amber-400" title="메모 추가">
+                                            <span className="text-sm">💡</span>
+                                            <span className="text-[10px] font-black hidden sm:inline">메모</span>
+                                        </button>
+                                        <div className="w-px h-4 bg-slate-200 mx-0.5 dark:bg-zinc-600"></div>
+                                        <button onClick={() => addNode('할일')} className="flex items-center gap-2 h-full px-3 rounded-[3px] hover:bg-cyan-50 text-cyan-600 transition-all active:scale-95 group dark:hover:bg-zinc-700 dark:text-cyan-400" title="할일 추가">
+                                            <span className="text-sm">✅</span>
+                                            <span className="text-[10px] font-black hidden sm:inline">할일</span>
+                                        </button>
+                                        <div className="w-px h-4 bg-slate-200 mx-0.5 dark:bg-zinc-600"></div>
+                                        <div className="relative" ref={nodeDropdownRef}>
+                                            <button onClick={() => setShowNodeDropdown(!showNodeDropdown)} className="flex items-center gap-1 h-full px-3 rounded-[3px] hover:bg-slate-100 text-slate-600 transition-all active:scale-95 dark:hover:bg-zinc-700 dark:text-slate-400" title="더 많은 노드 추가">
+                                                <span className="text-sm">➕</span>
+                                                <span className="text-[10px] font-black hidden sm:inline">더보기</span>
+                                                <svg className={`w-3 h-3 transition-transform ${showNodeDropdown ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                            </button>
+                                            {showNodeDropdown && (
+                                                <div className="absolute top-full left-0 mt-1 bg-white rounded-[3px] shadow-xl border border-slate-200 py-1 min-w-[140px] z-[200] dark:bg-darkpanel dark:border-darkborder">
+                                                    <button onClick={() => { addNode('장소'); setShowNodeDropdown(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-emerald-50 text-emerald-600 transition-all dark:hover:bg-zinc-700 dark:text-emerald-400">
+                                                        <span className="text-sm">📍</span>
+                                                        <span className="text-[11px] font-bold">장소</span>
+                                                    </button>
+                                                    <button onClick={() => { addNode('아이템'); setShowNodeDropdown(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-purple-50 text-purple-600 transition-all dark:hover:bg-zinc-700 dark:text-purple-400">
+                                                        <span className="text-sm">🎁</span>
+                                                        <span className="text-[11px] font-bold">아이템</span>
+                                                    </button>
+                                                    <button onClick={() => { addNode('세력'); setShowNodeDropdown(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-orange-50 text-orange-600 transition-all dark:hover:bg-zinc-700 dark:text-orange-400">
+                                                        <span className="text-sm">⚔️</span>
+                                                        <span className="text-[11px] font-bold">세력</span>
+                                                    </button>
+                                                    <button onClick={() => { addNode('복선'); setShowNodeDropdown(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-pink-50 text-pink-600 transition-all dark:hover:bg-zinc-700 dark:text-pink-400">
+                                                        <span className="text-sm">🎣</span>
+                                                        <span className="text-[11px] font-bold">복선</span>
+                                                    </button>
+                                                    <button onClick={() => { addNode('타임라인'); setShowNodeDropdown(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-teal-50 text-teal-600 transition-all dark:hover:bg-zinc-700 dark:text-teal-400">
+                                                        <span className="text-sm">⏰</span>
+                                                        <span className="text-[11px] font-bold">타임라인</span>
+                                                    </button>
+                                                    <button onClick={() => { addNode('설정'); setShowNodeDropdown(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-indigo-50 text-indigo-600 transition-all dark:hover:bg-zinc-700 dark:text-indigo-400">
+                                                        <span className="text-sm">📚</span>
+                                                        <span className="text-[11px] font-bold">설정</span>
+                                                    </button>
+                                                    <button onClick={() => { addNode('대사'); setShowNodeDropdown(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-sky-50 text-sky-600 transition-all dark:hover:bg-zinc-700 dark:text-sky-400">
+                                                        <span className="text-sm">💬</span>
+                                                        <span className="text-[11px] font-bold">대사</span>
+                                                    </button>
+                                                    <button onClick={() => { addNode('갈등'); setShowNodeDropdown(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-rose-50 text-rose-600 transition-all dark:hover:bg-zinc-700 dark:text-rose-400">
+                                                        <span className="text-sm">⚡</span>
+                                                        <span className="text-[11px] font-bold">갈등</span>
+                                                    </button>
+                                                    <button onClick={() => { addNode('그룹'); setShowNodeDropdown(false); }} className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-100 text-slate-600 transition-all dark:hover:bg-zinc-700 dark:text-slate-400">
+                                                        <span className="text-sm">📁</span>
+                                                        <span className="text-[11px] font-bold">그룹</span>
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    className="absolute bottom-8 right-8 z-[100] flex flex-col gap-2 font-bold dark:text-zinc-300">
+                                    <button
+                                        onClick={() => handleAutoLayout()}
+                                        className="w-11 h-11 flex items-center justify-center bg-white hover:bg-slate-50 dark:bg-darkpanel dark:hover:bg-zinc-700 shadow-xl border border-slate-200 dark:border-zinc-700 rounded-[3px] transition-all"
+                                        title="자동 정렬 (Auto Layout)"
+                                    >
+                                        <IconLayout className="w-5 h-5 text-slate-500 dark:text-zinc-400" />
+                                    </button>
+                                    <button
+                                        onClick={() => fitToScreen()}
+                                        className="w-11 h-11 flex items-center justify-center bg-white hover:bg-slate-50 dark:bg-darkpanel dark:hover:bg-zinc-700 shadow-xl border border-slate-200 dark:border-zinc-700 rounded-[3px] transition-all"
+                                        title="화면 중앙 맞춤"
+                                    >
+                                        {/* 아이콘 SVG 생략 */}
+                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="scale-75 text-slate-500 dark:text-zinc-400">
+                                            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                <div className="zoom-container w-full h-full" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}>
+                                    <svg className="canvas-svg">
+                                        <defs><marker id="arrow-event" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444" /></marker></defs>
+                                        {visibleEdges.map(edge => {
+                                            const from = findNode(edge.from); const to = findNode(edge.to); if (!from || !to) return null;
+                                            let x1 = from.x + CARD_W / 2, y1 = from.y + CARD_H / 2, x2 = to.x + CARD_W / 2, y2 = to.y + CARD_H / 2;
+                                            const coreTypes = ['인물', '사건', '메모'];
+                                            const isCoreType = (type) => coreTypes.includes(type);
+                                            const isEventToEvent = from.type === '사건' && to.type === '사건';
+                                            const isIdeaInvolved = from.type === '메모' || to.type === '메모';
+                                            const isPersonToEvent = (from.type === '인물' && to.type === '사건') || (from.type === '사건' && to.type === '인물');
+                                            const isPersonToPerson = from.type === '인물' && to.type === '인물';
+                                            const isSameType = from.type === to.type;
+
+                                            // 노드 타입별 고유 색상 (hex)
+                                            const typeColors = {
+                                                '장소': '#10b981', '아이템': '#a855f7', '세력': '#f97316',
+                                                '복선': '#ec4899', '타임라인': '#14b8a6', '설정': '#6366f1',
+                                                '대사': '#0ea5e9', '갈등': '#f43f5e', '그룹': '#64748b'
+                                            };
+
+                                            // 엣지 색상 결정 로직
+                                            let edgeColor;
+                                            if (isCoreType(from.type) && isCoreType(to.type)) {
+                                                // 기존 인물/사건/메모 연결 로직 유지
+                                                edgeColor = isIdeaInvolved ? "#facc15" : isPersonToEvent ? "#3b82f6" : isPersonToPerson ? "#93c5fd" : "#ef4444";
+                                            } else if (!isCoreType(from.type) && !isCoreType(to.type)) {
+                                                // 둘 다 새 타입일 경우
+                                                if (isSameType) {
+                                                    edgeColor = typeColors[from.type] || "#64748b";
+                                                } else {
+                                                    edgeColor = "#94a3b8"; // 회색
+                                                }
+                                            } else {
+                                                // 기존 타입과 새 타입 간 연결
+                                                edgeColor = "#94a3b8"; // 회색
+                                            }
+
+                                            let pathData = isEventToEvent ? `M ${x1} ${y1} L ${getEdgeTargetPos(from, to, 12).x} ${getEdgeTargetPos(from, to, 12).y}` : getBezierPath(x1, y1, x2, y2);
+                                            const strokeWidth = edge.width || (isPersonToEvent ? 12 : isEventToEvent ? 4 : isSameType && !isCoreType(from.type) ? 3 : 2);
+                                            const strokeDash = edge.style ? getStrokeDashArray(edge.style, strokeWidth) : "";
+                                            const labelWidth = Math.max(70, (edge.label || "").length * 10 + 20);
+                                            const showLabel = true;
+                                            return (
+                                                <g key={edge.id}>
+                                                    <path d={pathData} className="edge-hitbox" onDoubleClick={(e) => { e.stopPropagation(); setSelectedEdgeId(edge.id); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); saveHistory(); updateActiveProject(null, prev => prev.filter(ev => ev.id !== edge.id)); }} />
+                                                    {edge.style === 'double' ? (
+                                                        <>
+                                                            <path d={pathData} stroke={edgeColor} strokeWidth={strokeWidth * 3} markerEnd={isEventToEvent ? "url(#arrow-event)" : ""} className="edge-path opacity-80" />
+                                                            <path d={pathData} stroke={isDarkMode ? '#09080B' : '#f8fafc'} strokeWidth={strokeWidth} className="edge-path" />
+                                                        </>
+                                                    ) : (
+                                                        <path d={pathData} stroke={edgeColor} strokeWidth={strokeWidth} markerEnd={isEventToEvent ? "url(#arrow-event)" : ""} strokeDasharray={strokeDash} className={"edge-path opacity-80" + (edge.style === "dashed" ? " edge-path-animated" : "")} style={edge.style === 'dashed' ? { '--dash-offset': -(strokeWidth >= 6 ? strokeWidth * 5 : strokeWidth * 7), '--dash-duration': '0.5s' } : undefined} />
+                                                    )}
+                                                    {showLabel && edge.label && (
+                                                        <g className="cursor-pointer pointer-events-auto" onDoubleClick={(e) => { e.stopPropagation(); setSelectedEdgeId(edge.id); }}>
+                                                            <rect x={(x1 + x2) / 2 - labelWidth / 2} y={(y1 + y2) / 2 - 16} width={labelWidth} height="32" rx="4" fill="white" stroke={edgeColor} strokeWidth="1.5" className="dark:fill-zinc-800" /><text x={(x1 + x2) / 2} y={(y1 + y2) / 2 + 5} textAnchor="middle" fontSize="14" fontWeight="900" fill="#334155" className="dark:fill-zinc-200">{edge.label}</text>
+                                                        </g>
+                                                    )}
+                                                </g>
+                                            );
+                                        })}
+                                        {tempEdge && findNode(tempEdge.fromId) && <line x1={findNode(tempEdge.fromId).x + CARD_W / 2} y1={findNode(tempEdge.fromId).y + CARD_H / 2} x2={tempEdge.toX} y2={tempEdge.toY} stroke="#94a3b8" strokeWidth="2" strokeDasharray="4,4" />}
+                                    </svg>
+                                    {marquee && (
+                                        <div
+                                            className="absolute border-2 border-dashed border-blue-500 bg-blue-500/10 dark:bg-blue-400/10 dark:border-blue-400 pointer-events-none"
+                                            style={{
+                                                left: marquee.x,
+                                                top: marquee.y,
+                                                width: marquee.width,
+                                                height: marquee.height,
+                                                zIndex: 999
+                                            }}
+                                        />
+                                    )}
+
+                                    {/* 그룹 노드 먼저 렌더링 (뒤에 배치) */}
+                                    {visibleGroupNodes.map(node => (
+                                        <GroupNode key={node.id} node={node} isSelected={selectedNodeIds.has(node.id) || selectedNodeId === node.id} isDragging={draggingNodeId && (selectedNodeIds.has(node.id) || draggingNodeId === node.id || dragOffset.nodeIds.has(node.id))} onMouseDown={(e, id) => { e.stopPropagation(); if (rAF.current) { cancelAnimationFrame(rAF.current); rAF.current = null; } lastMousePos.current = { x: e.clientX, y: e.clientY }; latestMousePos.current = { x: e.clientX, y: e.clientY }; if (e.button === 0) { if (e.shiftKey) { setSelectedNodeIds(prev => { const newSet = new Set(prev); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); selectedNodeIdsRef.current = newSet; return newSet; }); return; } if (!selectedNodeIds.has(id)) { const newSet = new Set([id]); setSelectedNodeIds(newSet); selectedNodeIdsRef.current = newSet; } setDraggingNodeId(id); } }} onDoubleClick={(id) => { setSelectedNodeIds(new Set()); setSelectedNodeId(id); }} onDelete={deleteNode} onResize={resizeGroupNode} />
+                                    ))}
+                                    {/* 일반 노드 나중에 렌더링 (앞에 배치) */}
+                                    {visibleRegularNodes.map(node => (
+                                        <NodeCard
+                                            key={node.id}
+                                            node={node}
+                                            isTop={topNodeId === node.id}
+                                            isSelected={selectedNodeIds.has(node.id) || selectedNodeId === node.id}
+                                            isDragging={draggingNodeId && (selectedNodeIds.has(node.id) || draggingNodeId === node.id || dragOffset.nodeIds.has(node.id))}
+                                            onClick={(e, id) => { if (!e.shiftKey) setSelectedNodeIds(new Set([id])); }}
+                                            onUpdateNode={(id, data) => updateActiveProject(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, ...data } } : n))}
+                                            onMouseDown={(e, id) => {
+                                                e.stopPropagation();
+                                                if (rAF.current) { cancelAnimationFrame(rAF.current); rAF.current = null; }
+                                                lastMousePos.current = { x: e.clientX, y: e.clientY };
+                                                latestMousePos.current = { x: e.clientX, y: e.clientY };
+                                                if (e.button === 0) {
+                                                    if (e.shiftKey) {
+                                                        setSelectedNodeIds(prev => { const newSet = new Set(prev); if (newSet.has(id)) newSet.delete(id); else newSet.add(id); selectedNodeIdsRef.current = newSet; return newSet; });
+                                                        return;
+                                                    }
+                                                    if (!selectedNodeIds.has(id)) { const newSet = new Set([id]); setSelectedNodeIds(newSet); selectedNodeIdsRef.current = newSet; }
+                                                    setDraggingNodeId(id);
+                                                    setTopNodeId(id);
+                                                } else if (e.button === 2) {
+                                                    const node = findNode(id);
+                                                    if (node) { setTempEdge({ fromId: id, toX: node.x + CARD_W / 2, toY: node.y + CARD_H / 2 }); }
+                                                }
+                                            }}
+                                            onMouseUp={(e, id) => {
+                                                if (tempEdge && id !== tempEdge.fromId) {
+                                                    const edgeExists = edges.some(e => (e.from === tempEdge.fromId && e.to === id) || (e.from === id && e.to === tempEdge.fromId));
+                                                    if (!edgeExists) {
+                                                        saveHistory();
+                                                        hasConnectedRef.current = true;
+                                                        updateActiveProject(null, prev => [...prev, { id: generateUUID(), from: tempEdge.fromId, to: id, label: '' }]);
+                                                    }
+                                                }
+                                            }}
+                                            onDoubleClick={(id) => { setSelectedNodeIds(new Set()); setSelectedNodeId(id); }}
+                                            onDelete={deleteNode}
+                                        />
+                                    ))}
+                                </div>
+                            </>
+                        ) : compareMode && compareDocIds[0] && compareDocIds[1] ? (
+                            /* 문서 분할 비교 모드 UI - 싱글 뷰와 100% 동일한 크롬 탭 + 하단 3:7 레이아웃 */
+                            <div className="compare-container w-full h-full flex relative">
+                                {[0, 1].map((paneIdx) => {
+                                    const doc = getCompareDoc(paneIdx);
+                                    if (!doc) return null;
+                                    const paneWidth = paneIdx === 0 ? splitRatio : (100 - splitRatio);
+                                    const docLen = (doc.content || "").length;
+                                    const docNoSpace = (doc.content || "").replace(/\s+/g, "").length;
+                                    const docAchieve = Math.min(Math.round((docLen / defaultTargetCount) * 100), 100);
+
+                                    return (
+                                        <React.Fragment key={paneIdx}>
+                                            <div
+                                                className={`h-full flex flex-col overflow-hidden transition-all duration-500 ease-in-out ${isZenMode ? (activeComparePane === paneIdx ? "px-0 py-0 w-full" : "w-0 overflow-hidden opacity-0") : "px-3 py-6"}`}
+                                                style={{ width: isZenMode ? (activeComparePane === paneIdx ? "100%" : "0%") : `${paneWidth}%` }}
+                                                onClick={() => setActiveComparePane(paneIdx)}
+                                            >
+                                                {/* 상단 크롬 탭 헤더 (집중모드에서는 숨김) */}
+                                                {!isZenMode && (
+                                                    <div className="w-full chrome-tab-bar shrink-0">
+                                                        <div className="chrome-tab">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                                                                <polyline points="14 2 14 8 20 8" />
+                                                            </svg>
+                                                            <div className="chrome-tab-input-wrapper" data-value={doc.name || "문서 제목"}>
+                                                                <input
+                                                                    type="text"
+                                                                    name={`summer_doc_title_${paneIdx}`}
+                                                                    autoComplete="off"
+                                                                    data-lpignore="true"
+                                                                    value={doc.name}
+                                                                    onChange={(e) => setProjects(prev => prev.map(p => p.id === doc.id ? { ...p, name: e.target.value } : p))}
+                                                                    placeholder="문서 제목"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <div className="chrome-tab-status">
+                                                            {renderStatusSelector(doc)}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* 본문 종이 */}
+                                                <motion.div className="w-full flex-1 min-h-0 editor-paper relative" style={{ maxWidth: "100%", margin: "0" }}>
+                                                    <textarea
+                                                        ref={el => compareTextareaRefs.current[paneIdx] = el}
+                                                        className={`editor-textarea custom-scroll ${isZenMode && activeComparePane === paneIdx ? "zen-active" : ""}`}
+                                                        style={{ fontSize: `${editorFontSize}px` }}
+                                                        value={doc.content || ""}
+                                                        onChange={(e) => { updateCompareDocContent(doc.id, e.target.value); updateFocusScroll(); }}
+                                                        onFocus={() => setActiveComparePane(paneIdx)}
+                                                        onClick={() => updateFocusScroll()}
+                                                        onKeyUp={() => updateFocusScroll()}
+                                                        placeholder="이곳에 내용을 작성하세요... (@인물 / #사건 / $메모 입력)"
+                                                    />
+                                                </motion.div>
+
+                                                {/* 하단 4:6 바 */}
+                                                <div className={`w-full mt-3 mb-1 px-1 shrink-0 flex items-center justify-between gap-3 ${isZenMode ? 'opacity-50 hover:opacity-100 transition-opacity duration-300' : ''}`}>
+                                                    <div className="w-[40%] flex items-center justify-start min-w-0">
+                                                        <div className="flex items-center gap-1 bg-white dark:bg-zinc-800 p-0.5 h-[28px] rounded-md border border-slate-200 dark:border-zinc-700 shadow-sm shrink-0">
+                                                            <button
+                                                                onClick={() => {
+                                                                    if (spellInspectDocId === doc.id) exitSpellInspection();
+                                                                    else startSpellCheck(doc);
+                                                                }}
+                                                                className={`px-2.5 h-full text-[11px] font-bold rounded-[4px] transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                                                                    spellInspectDocId === doc.id
+                                                                    ? "bg-indigo-600 text-white shadow-sm font-black"
+                                                                    : "text-slate-600 hover:text-indigo-600 hover:bg-slate-100 dark:text-zinc-300 dark:hover:text-indigo-300 dark:hover:bg-zinc-700/80"
+                                                                }`}
+                                                                title="맞춤법 검사"
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                                    <path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" />
+                                                                </svg>
+                                                                <span>{spellInspectDocId === doc.id ? "복귀" : "맞춤법"}</span>
+                                                            </button>
+                                                            <div className="w-px h-3.5 bg-slate-200 dark:bg-zinc-700"></div>
+                                                            <button
+                                                                onClick={() => setShowSynopsisModal(true)}
+                                                                className="px-2 h-full text-[11px] font-bold rounded-[4px] transition-all flex items-center gap-1.5 text-slate-600 hover:text-indigo-600 hover:bg-slate-100 dark:text-zinc-300 dark:hover:text-indigo-300 dark:hover:bg-zinc-700/80"
+                                                                title="시놉시스"
+                                                            >
+                                                                <IconFileText className="w-3.5 h-3.5" />
+                                                                <span>시놉시스</span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="w-[60%] flex flex-col gap-1 min-w-0">
+                                                        <div className="w-full flex justify-between items-center text-[10px] font-bold text-slate-500 dark:text-zinc-400 whitespace-nowrap overflow-hidden">
+                                                            <div className="flex items-center gap-1.5 min-w-0">
+                                                                <span>공백 포함 <b className="text-slate-800 dark:text-zinc-200 font-extrabold">{docLen.toLocaleString()}</b>자</span>
+                                                                <span className="text-slate-300 dark:text-zinc-700">/</span>
+                                                                <span>공백 제외 <b className="text-slate-800 dark:text-zinc-200 font-extrabold">{docNoSpace.toLocaleString()}</b>자</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-1 shrink-0">
+                                                                <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">{docAchieve}%</span>
+                                                                <span className="text-slate-400 dark:text-zinc-500 text-[9px]">({defaultTargetCount.toLocaleString()}자)</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="w-full h-1 bg-slate-200/80 rounded-full overflow-hidden dark:bg-zinc-700/80">
+                                                            <motion.div
+                                                                initial={{ width: 0 }}
+                                                                animate={{ width: `${docAchieve}%` }}
+                                                                style={{ backgroundColor: docLen >= defaultTargetCount ? "#10b981" : "#4f46e5" }}
+                                                                className="h-full transition-all duration-500 ease-out rounded-full"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {paneIdx === 0 && !isZenMode && (
+                                                <div
+                                                    className="w-1 h-full cursor-col-resize bg-slate-300 dark:bg-zinc-600 hover:bg-indigo-400 dark:hover:bg-indigo-500 transition-colors flex items-center justify-center group shrink-0 rounded-none z-20"
+                                                    onMouseDown={handleSplitterMouseDown}
+                                                >
+                                                    <div className="w-1 h-12 bg-slate-400 dark:bg-zinc-500 group-hover:bg-white rounded-full transition-colors"></div>
+                                                </div>
+                                            )}
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                        <div className={`w-full h-full flex flex-col overflow-hidden editor-main-view ${isZenMode ? 'px-0 py-0' : 'px-0 sm:px-4 lg:px-10 py-0 sm:py-6'}`}>
+                            {/* 크롬 탭 스타일 상단 헤더 (집중모드에서는 숨김) */}
+                            {!isZenMode && (
+                                <div className={`w-full mx-auto chrome-tab-bar shrink-0 ${editorWidth === 'wide' ? 'max-w-[740px]' : editorWidth === 'narrow' ? 'max-w-[440px]' : 'max-w-[550px]'}`}>
+                                    <div className="chrome-tab">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                                            <polyline points="14 2 14 8 20 8" />
+                                        </svg>
+                                        <div className="chrome-tab-input-wrapper" data-value={activeProject.name || "문서 제목"}>
+                                            <input
+                                                type="text"
+                                                name="summer_doc_title"
+                                                autoComplete="off"
+                                                autoCorrect="off"
+                                                autoCapitalize="off"
+                                                spellCheck="false"
+                                                data-form-type="other"
+                                                data-lpignore="true"
+                                                data-1p-ignore="true"
+                                                value={activeProject.name}
+                                                onChange={(e) => handleProjectRename(activeProject.id, e.target.value)}
+                                                placeholder="문서 제목"
+                                                title="문서 제목 수정"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="chrome-tab-status">
+                                        {renderStatusSelector(activeProject)}
+                                    </div>
+                                </div>
+                            )}
+                            <div className={`w-full flex-1 min-h-0 editor-paper relative ${editorWidth === 'wide' ? 'editor-wide' : editorWidth === 'narrow' ? 'editor-narrow' : ''}`} style={{ boxShadow: isZenMode ? '0 0 0 15px rgba(0,0,0,0.05), 0 20px 50px rgba(0,0,0,0.1)' : '' }}>
+
+                                {spellInspectDocId === activeProject.id ? (
+                                    <React.Fragment>
+                                        <div className="spell-inspection-view custom-scroll" ref={spellInspectionRef} style={{ fontSize: `${editorFontSize}px`, position: 'relative' }}>
+                                            {spellTokens.map((token, tIdx) => {
+                                                if (token.is_err && token.err_id !== null) {
+                                                    const errObj = spellErrors[token.err_id];
+                                                    const isFixed = errObj && errObj.is_fixed;
+                                                    const isPassed = errObj && errObj.is_passed;
+                                                    const isActive = (token.err_id === spellCurrentErrorIdx);
+
+                                                    // 교정 완료된 토큰: 일반 span으로 렌더링 (spell-underline 없이)
+                                                    if (isFixed) {
+                                                        return (
+                                                            <span
+                                                                key={tIdx}
+                                                                id={`summer-spell-span-${token.err_id}`}
+                                                                style={{ color: '#10b981', fontWeight: 600 }}
+                                                                onClick={() => {
+                                                                    setSpellCurrentErrorIdx(token.err_id);
+                                                                    setSpellManualInput(errObj.applied_text || errObj.suggestion || "");
+                                                                    positionSpellPopover(token.err_id);
+                                                                }}
+                                                            >
+                                                                {errObj.applied_text}
+                                                            </span>
+                                                        );
+                                                    }
+
+                                                    // 넘어간 토큰
+                                                    let stateCls = isPassed ? "passed" : "";
+                                                    const activeCls = isActive ? "active" : "";
+                                                    const typeCls = `spell-${token.type}`;
+
+                                                    return (
+                                                        <span
+                                                            key={tIdx}
+                                                            id={`summer-spell-span-${token.err_id}`}
+                                                            className={`spell-underline ${typeCls} ${stateCls} ${activeCls}`}
+                                                            onClick={() => {
+                                                                setSpellCurrentErrorIdx(token.err_id);
+                                                                setSpellManualInput(errObj?.suggestion || "");
+                                                                positionSpellPopover(token.err_id);
+                                                            }}
+                                                        >
+                                                            {token.text}
+                                                        </span>
+                                                    );
+                                                }
+                                                return <span key={tIdx}>{token.text}</span>;
+                                            })}
+
+                                            {/* Floating Popover Inspector */}
+                                            {spellPopoverPos && spellErrors[spellCurrentErrorIdx] && (
+                                                <div
+                                                    className="spell-floating-popover"
+                                                    style={{ top: `${spellPopoverPos.top}px`, left: `${spellPopoverPos.left}px` }}
+                                                >
+                                                    <div className="flex justify-between items-center pb-1 border-b border-slate-200 dark:border-zinc-700">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                                                spellErrors[spellCurrentErrorIdx].type === "spelling" ? "bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300" :
+                                                                spellErrors[spellCurrentErrorIdx].type === "spacing" ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300" :
+                                                                spellErrors[spellCurrentErrorIdx].type === "ambiguous" ? "bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-300" :
+                                                                "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300"
+                                                            }`}>
+                                                                {spellErrors[spellCurrentErrorIdx].label}
+                                                            </span>
+                                                            <span className="text-[11px] text-slate-400 font-bold">
+                                                                {spellCurrentErrorIdx + 1} / {spellErrors.length}
+                                                            </span>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => setSpellPopoverPos(null)}
+                                                            className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 text-xs px-1"
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </div>
+
+                                                    {spellErrors[spellCurrentErrorIdx].suggestion !== spellErrors[spellCurrentErrorIdx].original ? (
+                                                        <div>
+                                                            <div className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 mb-1">수정 제안 (클릭 시 즉시 적용)</div>
+                                                            <div
+                                                                className="spell-suggest-box"
+                                                                onClick={() => applySpellCorrection(spellErrors[spellCurrentErrorIdx].suggestion)}
+                                                            >
+                                                                <span className="text-emerald-700 dark:text-emerald-400 font-bold text-sm">
+                                                                    {spellErrors[spellCurrentErrorIdx].suggestion}
+                                                                </span>
+                                                                <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
+                                                                    적용 ➔
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg p-2.5 text-xs text-amber-800 dark:text-amber-200">
+                                                            <div className="font-bold mb-0.5">💡 표준어/문맥 의심 단어</div>
+                                                            <div className="text-[11px] text-amber-700 dark:text-amber-300">
+                                                                자동 치환 제안이 없어 <b>직접 입력</b>으로 수정해 주세요.
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    <div>
+                                                        <div className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 mb-1">직접 입력</div>
+                                                        <div className="spell-manual-container">
+                                                            <input
+                                                                type="text"
+                                                                className="spell-manual-input"
+                                                                value={spellManualInput}
+                                                                onChange={(e) => setSpellManualInput(e.target.value)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === "Enter") {
+                                                                        applySpellCorrection(spellManualInput.trim() || spellErrors[spellCurrentErrorIdx].suggestion);
+                                                                    }
+                                                                }}
+                                                                placeholder="단어 직접 수정"
+                                                            />
+                                                            <button
+                                                                className="btn-spell-apply"
+                                                                onClick={() => applySpellCorrection(spellManualInput.trim() || spellErrors[spellCurrentErrorIdx].suggestion)}
+                                                            >
+                                                                적용
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="spell-nav-actions">
+                                                        <button
+                                                            onClick={() => {
+                                                                const prevIdx = spellCurrentErrorIdx > 0 ? spellCurrentErrorIdx - 1 : spellErrors.length - 1;
+                                                                setSpellCurrentErrorIdx(prevIdx);
+                                                                setSpellManualInput(spellErrors[prevIdx].is_fixed ? spellErrors[prevIdx].applied_text : spellErrors[prevIdx].suggestion);
+                                                                positionSpellPopover(prevIdx);
+                                                            }}
+                                                        >
+                                                            ◂ 이전
+                                                        </button>
+                                                        <button
+                                                            onClick={() => {
+                                                                const nextIdx = spellCurrentErrorIdx < spellErrors.length - 1 ? spellCurrentErrorIdx + 1 : 0;
+                                                                setSpellCurrentErrorIdx(nextIdx);
+                                                                setSpellManualInput(spellErrors[nextIdx].is_fixed ? spellErrors[nextIdx].applied_text : spellErrors[nextIdx].suggestion);
+                                                                positionSpellPopover(nextIdx);
+                                                            }}
+                                                        >
+                                                            다음 ▸
+                                                        </button>
+                                                        <button
+                                                            className="btn-spell-pass-yellow"
+                                                            onClick={passSpellCurrent}
+                                                        >
+                                                            넘어가기 ➔
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </React.Fragment>
+                                ) : (
+                                <textarea
+                                    ref={textareaRef}
+                                    // [중요] zen-active 클래스 조건부 적용
+                                    className={`editor-textarea custom-scroll ${isZenMode ? 'zen-active' : ''}`}
+                                    style={{ fontSize: `${editorFontSize}px` }}
+                                    value={activeProject.content || ""}
+                                    onChange={(e) => {
+                                        handleDocInput(e);
+                                        updateFocusScroll();
+                                    }}
+                                    onPaste={(e) => {
+                                        // PWA(standalone) 환경에서 외부 클립보드 붙여넣기가 안 되는 문제 수정
+                                        // e.clipboardData로 직접 텍스트를 읽어 controlled textarea에 수동 삽입
+                                        const pastedText = e.clipboardData && e.clipboardData.getData('text');
+                                        if (pastedText) {
+                                            e.preventDefault();
+                                            const ta = e.target;
+                                            const start = ta.selectionStart;
+                                            const end = ta.selectionEnd;
+                                            const currentVal = ta.value;
+                                            const newVal = currentVal.slice(0, start) + pastedText + currentVal.slice(end);
+                                            // React controlled input을 우회하여 value를 강제로 업데이트
+                                            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                                            nativeInputValueSetter.call(ta, newVal);
+                                            ta.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
+                                            // 커서 위치를 붙여넣은 텍스트 뒤로 이동
+                                            requestAnimationFrame(() => {
+                                                ta.setSelectionRange(start + pastedText.length, start + pastedText.length);
+                                                updateFocusScroll();
+                                            });
+                                        } else {
+                                            requestAnimationFrame(updateFocusScroll);
+                                        }
+                                    }}
+                                    onKeyDown={(e) => {
+                                        handleDocKeyDown(e);
+                                        if (e.key === 'Enter' || e.key === 'Backspace') requestAnimationFrame(updateFocusScroll);
+                                    }}
+                                    onClick={() => updateFocusScroll()}
+                                    onKeyUp={() => updateFocusScroll()}
+                                    placeholder="이곳에 내용을 작성하세요... (@인물 / #사건 / $메모 입력)"
+                                />
+                                )}
+                            </div>
+                            {/* 에디터 하단 영역: 좌측 4 (맞춤법/시놉시스/초고), 우측 6 (단어수 통계 + 게이지) 완벽 4:6 분리 */}
+                            <div className={`w-full mx-auto mt-2 sm:mt-3 mb-1 px-1 shrink-0 flex items-center justify-between gap-2 sm:gap-4 mobile-bottom-bar ${editorWidth === 'wide' ? 'max-w-[740px]' : editorWidth === 'narrow' ? 'max-w-[440px]' : 'max-w-[550px]'} ${isZenMode ? 'opacity-50 hover:opacity-100 transition-opacity duration-300' : ''}`}>
+                                {/* 좌측 (40% 영역): 맞춤법 / 시놉시스 툴바 */}
+                                <div className="w-[40%] flex items-center justify-start min-w-0">
+                                    <div className="flex items-center gap-1 bg-white dark:bg-zinc-800 p-0.5 h-[28px] rounded-md border border-slate-200 dark:border-zinc-700 shadow-sm shrink-0">
+                                        <button
+                                            onClick={() => {
+                                                if (spellInspectDocId === activeProject.id) {
+                                                    exitSpellInspection();
+                                                } else {
+                                                    startSpellCheck(activeProject);
+                                                }
+                                            }}
+                                            className={`px-2.5 h-full text-[11px] font-bold rounded-[4px] transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                                                spellInspectDocId === activeProject.id
+                                                ? 'bg-indigo-600 text-white shadow-sm font-black'
+                                                : 'text-slate-600 hover:text-indigo-600 hover:bg-slate-100 dark:text-zinc-300 dark:hover:text-indigo-300 dark:hover:bg-zinc-700/80'
+                                            }`}
+                                            title="맞춤법 검사 및 교정"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className={`w-3.5 h-3.5 ${isSpellChecking ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                {isSpellChecking ? (
+                                                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                                                ) : (
+                                                    <>
+                                                        <path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" />
+                                                    </>
+                                                )}
+                                            </svg>
+                                            <span>{isSpellChecking ? '검사중' : spellInspectDocId === activeProject.id ? '복귀' : '맞춤법'}</span>
+                                        </button>
+
+                                        <div className="w-px h-3.5 bg-slate-200 dark:bg-zinc-700"></div>
+
+                                        <button
+                                            onClick={() => setShowSynopsisModal(true)}
+                                            className="px-2 h-full text-[11px] font-bold rounded-[4px] transition-all flex items-center gap-1.5 text-slate-600 hover:text-indigo-600 hover:bg-slate-100 dark:text-zinc-300 dark:hover:text-indigo-300 dark:hover:bg-zinc-700/80"
+                                            title="시놉시스"
+                                        >
+                                            <IconFileText className="w-3.5 h-3.5" />
+                                            <span>시놉시스</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* 우측 (60% 영역): 좌측(글자수 수치) / 우측(달성률 & 목표치) 분할 + 하단 게이지 바 */}
+                                <div className="w-[60%] flex flex-col gap-1 min-w-0">
+                                    <div className="w-full flex justify-between items-center text-[10px] font-bold text-slate-500 dark:text-zinc-400 whitespace-nowrap overflow-hidden">
+                                        {/* 우측 영역 내 좌측 정렬: 공백 포함/제외 수치 */}
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                            <span>공백 포함 <b className="text-slate-800 dark:text-zinc-200 font-extrabold">{docStats.totalLen.toLocaleString()}</b>자</span>
+                                            <span className="text-slate-300 dark:text-zinc-700">/</span>
+                                            <span>공백 제외 <b className="text-slate-800 dark:text-zinc-200 font-extrabold">{docStats.noSpaceLen.toLocaleString()}</b>자</span>
+                                        </div>
+                                        {/* 우측 영역 내 우측 정렬: 달성률 및 목표치 */}
+                                        <div className="flex items-center gap-1 shrink-0">
+                                            <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">{docStats.achievement}%</span>
+                                            <span className="text-slate-400 dark:text-zinc-500 text-[9px]">({defaultTargetCount.toLocaleString()}자)</span>
+                                        </div>
+                                    </div>
+                                    <div className="w-full h-1 bg-slate-200/80 rounded-full overflow-hidden dark:bg-zinc-700/80">
+                                        <motion.div
+                                            initial={{ width: 0 }}
+                                            animate={{ width: `${docStats.achievement}%` }}
+                                            style={{ backgroundColor: docStats.totalLen >= defaultTargetCount ? "#10b981" : "#4f46e5" }}
+                                            className="h-full transition-all duration-500 ease-out rounded-full"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        )}
+                        {/* Floating History Button for Single Doc View */}
+                        {!isTrashOpen && activeProject.type === "doc" && !compareMode && !isZenMode && !corkboardMode && enableHistory && (
+                            <button
+                                onClick={() => setShowHistoryModal(true)}
+                                className="mobile-hide fixed bottom-6 right-6 sm:right-8 md:right-10 z-[100] h-8 px-3 bg-white dark:bg-zinc-800 shadow-xl border border-slate-200 dark:border-zinc-700 rounded-full flex items-center gap-1.5 text-slate-500 dark:text-zinc-400 font-bold hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-200 transition-all text-[11px]"
+                            >
+                                <IconHistory className="w-3.5 h-3.5" />
+                                <span>기록 {activeProject.history?.length > 0 ? `(${activeProject.history.length})` : ""}</span>
+                            </button>
+                        )}
+                    </main>
+
+                    {/* 히스토리 모달 */}
+                    {showHistoryModal && activeProject && activeProject.type === 'doc' && (
+                        <HistoryManager
+                            doc={activeProject}
+                            onClose={() => setShowHistoryModal(false)}
+                            onRestore={restoreSnapshot}
+                            onSnapshot={(memo) => createSnapshot(activeProject.id, memo)}
+                            onDelete={deleteSnapshot}
+                        />
+                    )}
+
+                    {/* 시놉시스 모달 */}
+                    <AnimatePresence>
+                        {showSynopsisModal && activeProject && (
+                            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                                <motion.div 
+                                    initial={{ opacity: 0 }} 
+                                    animate={{ opacity: 1 }} 
+                                    exit={{ opacity: 0 }} 
+                                    className="absolute inset-0 bg-black/50 backdrop-blur-sm" 
+                                    onClick={() => setShowSynopsisModal(false)} 
+                                />
+                                <motion.div
+                                    initial={{ opacity: 0, scale: 0.95 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.95 }}
+                                    className="bg-white dark:bg-darkpanel w-[600px] h-[500px] rounded-xl shadow-2xl flex flex-col overflow-hidden relative z-10 border border-slate-200 dark:border-zinc-700"
+                                >
+                                    <div className="px-5 py-3 border-b border-slate-100 dark:border-zinc-700 flex justify-between items-center bg-slate-50/50 dark:bg-zinc-800/50">
+                                        <h2 className="text-sm font-black text-slate-800 dark:text-zinc-100 flex items-center gap-2">
+                                            📝 시놉시스
+                                        </h2>
+                                        <div className="flex items-center gap-2">
+                                            <button 
+                                                onClick={() => { setShowSynopsisModal(false); setCorkboardMode(true); }}
+                                                className="px-3 py-1.5 bg-amber-50 text-amber-600 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 rounded text-xs font-bold transition-colors"
+                                            >
+                                                코르크 보드로 가기
+                                            </button>
+                                            <button onClick={() => setShowSynopsisModal(false)} className="p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-700 rounded transition-colors">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="flex-1 p-0 flex flex-col">
+                                        <textarea 
+                                            className="flex-1 w-full p-8 resize-none outline-none text-slate-600 dark:text-zinc-300 leading-loose custom-scroll bg-transparent text-base"
+                                            placeholder="시놉시스나 개요를 작성하세요..."
+                                            value={activeProject.synopsis || ''}
+                                            onChange={(e) => setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, synopsis: e.target.value } : p))}
+                                        />
+                                    </div>
+                                </motion.div>
+                            </div>
+                        )}
+                    </AnimatePresence>
+
+                    <AnimatePresence>
+                        {mention.active && (
+                            <div className="mention-list" style={{ top: mention.y, left: mention.x }}>
+                                <div className="w-[250px] flex flex-col border-r border-slate-100 dark:border-zinc-700">
+                                    <div className="p-2 bg-slate-50 dark:bg-zinc-800 text-[9px] font-black text-slate-400 tracking-widest uppercase border-b border-slate-100 dark:border-zinc-700">
+                                        {mention.type === '@' ? '캐릭터 리스트' : mention.type === '#' ? '사건 리스트' : mention.type === '$' ? '메모 리스트' : 'TO-DO 리스트'}
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto custom-scroll">
+                                        {filteredMentionNodes.length > 0 ? filteredMentionNodes.map((node, i) => (
+                                            <div key={node.id}
+                                                onClick={() => insertMention(node)}
+                                                onMouseEnter={() => setMention(prev => ({ ...prev, selectedIndex: i }))}
+                                                className={`flex items-center px-3 h-[38px] cursor-pointer transition-colors border-l-4 ${mention.selectedIndex === i
+                                                    ? 'mention-item-active'
+                                                    : 'hover:bg-slate-50 dark:hover:bg-zinc-800 border-l-transparent'
+                                                    }`}
+                                            >
+                                                {/* 좌측: 이모지 및 이름 (높이 고정으로 인해 세로 중앙 자동 정렬) */}
+                                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                    <span className="text-sm shrink-0 leading-none">{node.data.emoji}</span>
+                                                    <div className="flex items-baseline gap-2 truncate">
+                                                        <span className="font-black text-xs text-slate-800 dark:text-zinc-100 shrink-0">
+                                                            {node.label}
+                                                        </span>
+                                                        <span className="text-[9px] text-slate-400 font-bold truncate opacity-80">
+                                                            / {node.projectName}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {/* 우측: 인물일 경우 배지 표시, 사건일 경우 빈 공간 유지 (높이 뒤틀림 방지) */}
+                                                <div className="shrink-0 ml-2 flex items-center h-full">
+                                                    {node.type === '인물' ? (
+                                                        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-[2px] rounded-sm shadow-sm leading-none ${getRoleBadgeStyle(node.data.role)}`}>
+                                                            {node.data.role}
+                                                        </span>
+                                                    ) : node.type === '할일' && (node.data.items || []).length > 0 && (node.data.items || []).every(i => i.done) ? (
+                                                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-[2px] bg-cyan-100 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-400">
+                                                            완료
+                                                        </span>
+                                                    ) : (
+                                                        /* 사건일 때는 배지가 없어도 높이를 유지하도록 빈 공간 확보 */
+                                                        <div className="w-1 h-4"></div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )) : (
+                                            <div className="p-4 text-[10px] text-slate-400 italic text-center">결과 없음</div>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="flex-1 flex flex-col bg-white dark:bg-[#1a1a1d] p-5 overflow-hidden rounded-r-[3px]">
+                                    {filteredMentionNodes[mention.selectedIndex] ? (
+                                        <>
+                                            <div className="flex items-center gap-3 mb-2">
+                                                <span className="text-2xl">{filteredMentionNodes[mention.selectedIndex].data.emoji}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="font-black text-slate-800 dark:text-zinc-100">{filteredMentionNodes[mention.selectedIndex].label}</div>
+                                                </div>
+                                            </div>
+                                            <div className="text-2xs text-slate-500 dark:text-zinc-400 leading-relaxed overflow-y-auto custom-scroll pr-2">
+                                                {filteredMentionNodes[mention.selectedIndex].type === '인물' && (
+                                                    <div className="mb-2 pb-2 border-b border-slate-50 dark:border-zinc-800 flex flex-wrap gap-x-3 gap-y-1 text-[12px] font-bold uppercase text-indigo-500">
+                                                        <span>성별: {filteredMentionNodes[mention.selectedIndex].data.gender}</span>
+                                                        <span>나이: {filteredMentionNodes[mention.selectedIndex].data.age || '미정'}</span>
+                                                        <span>직업: {filteredMentionNodes[mention.selectedIndex].data.job || '미정'}</span>
+                                                        <span>종족: {filteredMentionNodes[mention.selectedIndex].data.race || '인간'}</span>
+                                                    </div>
+                                                )}
+
+                                                {filteredMentionNodes[mention.selectedIndex].type === '사건' && (
+                                                    <div className="mb-2 pb-2 border-b border-slate-50 dark:border-zinc-800 flex flex-wrap gap-x-3 gap-y-1 text-[12px] font-bold uppercase text-rose-500">
+                                                        <span>장소: {filteredMentionNodes[mention.selectedIndex].data.place || '미정'}</span>
+                                                        <span>시기: {filteredMentionNodes[mention.selectedIndex].data.year || '미정'}</span>
+                                                    </div>
+                                                )}
+
+                                                {filteredMentionNodes[mention.selectedIndex].type === '메모' && (
+                                                    <div className="mb-2 pb-2 border-b border-slate-50 dark:border-zinc-800 flex flex-wrap gap-x-3 gap-y-1 text-[12px] font-bold uppercase text-amber-500">
+                                                        <span>📝 {filteredMentionNodes[mention.selectedIndex].data.category || '메모'}</span>
+                                                    </div>
+                                                )}
+
+                                                {filteredMentionNodes[mention.selectedIndex].type === '할일' && (
+                                                    <div className="mb-2 pb-2">
+                                                        <div className="text-[12px] font-bold uppercase text-cyan-500 mb-2">✅ 할일 목록</div>
+                                                        <div className="space-y-1">
+                                                            {(filteredMentionNodes[mention.selectedIndex].data.items || []).map(item => (
+                                                                <div key={item.id} className="flex items-center gap-2">
+                                                                    <input 
+                                                                        type="checkbox" 
+                                                                        checked={item.done}
+                                                                        onChange={() => handleToggleTodoInMention(filteredMentionNodes[mention.selectedIndex].projectId, filteredMentionNodes[mention.selectedIndex].id, item.id)}
+                                                                        className="w-3 h-3 rounded-sm border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                                                    />
+                                                                    <span className={`text-xs ${item.done ? 'text-slate-400 line-through' : 'text-slate-700 dark:text-zinc-300'}`}>
+                                                                        {item.text}
+                                                                    </span>
+                                                                </div>
+                                                            ))}
+                                                            {(filteredMentionNodes[mention.selectedIndex].data.items || []).length === 0 && (
+                                                                <div className="text-xs text-slate-400 italic">등록된 할 일이 없습니다</div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {filteredMentionNodes[mention.selectedIndex].data.memo || (filteredMentionNodes[mention.selectedIndex].type !== '할일' ? "작성된 메모가 없습니다." : "")}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="flex-1 flex items-center justify-center text-slate-300 dark:text-zinc-700 text-xs italic">정보가 없습니다.</div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </AnimatePresence>
+
+                    <AnimatePresence>
+                        {activeNode && (
+                            <>
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="fixed inset-0 bg-black/20 z-[199]"
+                                    onClick={() => { setSelectedNodeId(null); }}
+                                />
+                                <motion.div
+                                    initial={{ x: '100%' }}
+                                    animate={{ x: 0 }}
+                                    exit={{ x: '100%' }}
+                                    transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                                    className="fixed top-0 right-0 h-full w-[420px] bg-white dark:bg-darkpanel shadow-2xl z-[200] flex flex-col border-l border-slate-200 dark:border-zinc-700"
+                                >
+                                    {/* 헤더 */}
+                                    <div className="h-16 px-6 flex items-center justify-between border-b border-slate-200 dark:border-zinc-700 shrink-0">
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-2xl">{activeNode.data.emoji}</span>
+                                            <div>
+                                                <h2 className="text-sm font-black text-slate-800 dark:text-zinc-100">{activeNode.label}</h2>
+                                                <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">{activeNode.type} 편집</span>
+                                            </div>
+                                        </div>
+                                        <button onClick={() => setSelectedNodeId(null)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200 rounded-sm transition-colors">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                        </button>
+                                    </div>
+
+                                    {/* 컨텐츠 */}
+                                    <div className="flex-1 overflow-y-auto p-6 custom-scroll">
+                                        <div className="space-y-5">
+                                            {/* 인물 전용 필드 */}
+                                            {activeNode.type === '인물' && (
+                                                <>
+                                                    {/* 1열: 이모지 / 이름 / 주사위 */}
+                                                    <div className="flex gap-3">
+                                                        <div className="w-14">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">이모지</label>
+                                                            <input className="w-full mt-1 px-2 py-2 bg-slate-50 rounded-[3px] text-center text-lg border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.emoji || (activeNode.type === '그룹' ? '📁' : '')} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, emoji: e.target.value } } : n))} />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">이름</label>
+                                                            <div className="flex gap-1">
+                                                                <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-black text-lg border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.label} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, label: e.target.value } : n))} />
+                                                                <button
+                                                                    onClick={() => setIsNameGenOpen(!isNameGenOpen)}
+                                                                    className={`mt-1 w-[42px] h-[42px] flex items-center justify-center rounded-[3px] border transition-colors ${isNameGenOpen ? 'bg-indigo-100 border-indigo-300 text-indigo-600 dark:bg-indigo-900/50 dark:border-indigo-700 dark:text-indigo-400' : 'bg-slate-50 border-slate-200 text-slate-400 hover:text-indigo-500 hover:border-indigo-300 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-300'}`}
+                                                                    title="이름 생성기 열기"
+                                                                >
+                                                                    🎲
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* 2열: 역할 / 성별 / 나이 */}
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">역할</label>
+                                                            <select className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-black text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.role} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, role: e.target.value } } : n))}>
+                                                                <option value="주인공">😁 주인공</option>
+                                                                <option value="조력자">😎 조력자</option>
+                                                                <option value="적대자">😡 적대자</option>
+                                                                <option value="조연">🤓 조연</option>
+                                                                <option value="엑스트라">🥸 엑스트라</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">성별</label>
+                                                            <select className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.gender} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, gender: e.target.value } } : n))}>
+                                                                <option value="남자">남자</option>
+                                                                <option value="여자">여자</option>
+                                                                <option value="중성">중성</option>
+                                                                <option value="미지정">미지정</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">나이</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.age} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, age: e.target.value } } : n))} placeholder="나이" />
+                                                        </div>
+                                                    </div>
+
+                                                    {/* 3열: 직업 / 종족 */}
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">직업</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.job} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, job: e.target.value } } : n))} placeholder="직업 입력" />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">종족</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.race || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, race: e.target.value } } : n))} placeholder="종족 입력" />
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* 사건/메모: 이모지 + 이름 */}
+                                            {activeNode.type !== '인물' && (
+                                                <div className="flex gap-3">
+                                                    <div className="w-20">
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">이모지</label>
+                                                        <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] text-center text-xl border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.emoji || (activeNode.type === '그룹' ? '📁' : '')} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, emoji: e.target.value } } : n))} />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">이름</label>
+                                                        <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-black text-lg border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.label} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, label: e.target.value } : n))} />
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* 메모 전용 필드 */}
+                                            {activeNode.type === '메모' && (
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">분류</label>
+                                                    <div className="flex flex-wrap gap-1.5 mt-1">
+                                                        {['메모', '장소', '아이템', '세력', '복선', '타임라인', '설정', '대사', '갈등'].map(cat => (
+                                                            <button key={cat} onClick={() => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, category: cat } } : n))} className={`px-3 py-1.5 rounded-[3px] text-xs font-bold transition-all ${(activeNode.data.category || '메모') === cat ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600'}`}>{cat}</button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* 사건 전용 필드 */}
+                                            {activeNode.type === '사건' && (
+                                                <div className="flex gap-3">
+                                                    <div className="flex-1">
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">발생 장소</label>
+                                                        <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.place || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, place: e.target.value } } : n))} placeholder="장소 입력" />
+                                                    </div>
+                                                    <div className="flex-1">
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">발생 시기</label>
+                                                        <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.year || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, year: e.target.value } } : n))} placeholder="시기/연도 입력" />
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* 장소 전용 필드 */}
+                                            {activeNode.type === '장소' && (
+                                                <>
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">지역/위치</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.region || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, region: e.target.value } } : n))} placeholder="지역 입력" />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">기후/환경</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.climate || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, climate: e.target.value } } : n))} placeholder="기후/환경 입력" />
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">장소 설명</label>
+                                                        <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.description || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, description: e.target.value } } : n))} placeholder="장소에 대한 간단한 설명" />
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* 아이템 전용 필드 */}
+                                            {activeNode.type === '아이템' && (
+                                                <>
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">분류</label>
+                                                            <select className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.category || '일반'} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, category: e.target.value } } : n))}>
+                                                                <option value="일반">일반</option>
+                                                                <option value="무기">무기</option>
+                                                                <option value="방어구">방어구</option>
+                                                                <option value="장신구">장신구</option>
+                                                                <option value="소모품">소모품</option>
+                                                                <option value="재료">재료</option>
+                                                                <option value="열쇠/도구">열쇠/도구</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">희귀도</label>
+                                                            <select className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.rarity || '보통'} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, rarity: e.target.value } } : n))}>
+                                                                <option value="보통">보통</option>
+                                                                <option value="고급">고급</option>
+                                                                <option value="희귀">희귀</option>
+                                                                <option value="영웅">영웅</option>
+                                                                <option value="전설">전설</option>
+                                                                <option value="유일">유일</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">소유자</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.owner || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, owner: e.target.value } } : n))} placeholder="소유자 입력" />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">효과/능력</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.effect || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, effect: e.target.value } } : n))} placeholder="효과/능력 입력" />
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* 세력 전용 필드 */}
+                                            {activeNode.type === '세력' && (
+                                                <>
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">리더/수장</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.leader || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, leader: e.target.value } } : n))} placeholder="리더 입력" />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">영역/본거지</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.territory || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, territory: e.target.value } } : n))} placeholder="영역 입력" />
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">주요 구성원</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.members || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, members: e.target.value } } : n))} placeholder="주요 구성원 입력" />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">목표/이념</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.goal || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, goal: e.target.value } } : n))} placeholder="목표/이념 입력" />
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* 복선 전용 필드 */}
+                                            {activeNode.type === '복선' && (
+                                                <>
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">등장 장/회차</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.chapter || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, chapter: e.target.value } } : n))} placeholder="장/회차 입력" />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">상태</label>
+                                                            <select className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.status || '미회수'} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, status: e.target.value } } : n))}>
+                                                                <option value="미회수">🔄 미회수</option>
+                                                                <option value="진행중">🔥 진행중</option>
+                                                                <option value="회수됨">✅ 회수됨</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">힌트/복선 내용</label>
+                                                        <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.hint || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, hint: e.target.value } } : n))} placeholder="복선 내용 입력" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">회수 계획</label>
+                                                        <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.reveal || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, reveal: e.target.value } } : n))} placeholder="회수 계획 입력" />
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* 타임라인 전용 필드 */}
+                                            {activeNode.type === '타임라인' && (
+                                                <>
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">날짜/시점</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.date || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, date: e.target.value } } : n))} placeholder="날짜/시점 입력" />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">시대/배경</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.era || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, era: e.target.value } } : n))} placeholder="시대/배경 입력" />
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">중요도</label>
+                                                        <select className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.importance || '보통'} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, importance: e.target.value } } : n))}>
+                                                            <option value="낮음">낮음</option>
+                                                            <option value="보통">보통</option>
+                                                            <option value="중요">중요</option>
+                                                            <option value="핵심">핵심</option>
+                                                        </select>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* 설정 전용 필드 */}
+                                            {activeNode.type === '설정' && (
+                                                <>
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">분류</label>
+                                                            <select className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.category || '세계관'} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, category: e.target.value } } : n))}>
+                                                                <option value="세계관">세계관</option>
+                                                                <option value="마법체계">마법체계</option>
+                                                                <option value="종족">종족</option>
+                                                                <option value="역사">역사</option>
+                                                                <option value="문화">문화</option>
+                                                                <option value="규칙">규칙</option>
+                                                                <option value="기타">기타</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">적용 범위</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.scope || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, scope: e.target.value } } : n))} placeholder="적용 범위 입력" />
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* 대사 전용 필드 */}
+                                            {activeNode.type === '대사' && (
+                                                <>
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">화자</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.speaker || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, speaker: e.target.value } } : n))} placeholder="화자 입력" />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">감정/톤</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.emotion || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, emotion: e.target.value } } : n))} placeholder="감정/톤 입력" />
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">상황/맥락</label>
+                                                        <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.situation || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, situation: e.target.value } } : n))} placeholder="상황/맥락 입력" />
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* 갈등 전용 필드 */}
+                                            {activeNode.type === '갈등' && (
+                                                <>
+                                                    <div className="flex gap-3">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">갈등 당사자</label>
+                                                            <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.parties || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, parties: e.target.value } } : n))} placeholder="당사자 입력 (예: A vs B)" />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">상태</label>
+                                                            <select className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.status || '진행중'} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, status: e.target.value } } : n))}>
+                                                                <option value="잠재적">🔵 잠재적</option>
+                                                                <option value="진행중">🔥 진행중</option>
+                                                                <option value="격화">💥 격화</option>
+                                                                <option value="해결됨">✅ 해결됨</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">갈등 원인</label>
+                                                        <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.cause || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, cause: e.target.value } } : n))} placeholder="갈등 원인 입력" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">해결 방안</label>
+                                                        <input className="w-full mt-1 px-3 py-2 bg-slate-50 rounded-[3px] font-bold text-sm border border-slate-200 outline-none h-[42px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.resolution || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, resolution: e.target.value } } : n))} placeholder="해결 방안 입력" />
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* 그룹 전용 필드 */}
+                                            {activeNode.type === '그룹' && (
+                                                <>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">메모</label>
+                                                        <input type="text" className="w-full mt-1 p-3 bg-slate-50 border border-slate-200 text-sm outline-none focus:bg-white transition-all dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.memo || ''} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, memo: e.target.value } } : n))} placeholder="그룹 메모..." />
+                                                    </div>
+                                                    <div className="flex gap-4">
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">너비</label>
+                                                            <input type="number" className="w-full mt-1 p-3 bg-slate-50 border border-slate-200 text-sm outline-none focus:bg-white transition-all dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.width || 400} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, width: Math.max(200, parseInt(e.target.value) || 200) } } : n))} min="200" />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">높이</label>
+                                                            <input type="number" className="w-full mt-1 p-3 bg-slate-50 border border-slate-200 text-sm outline-none focus:bg-white transition-all dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200" value={activeNode.data.height || 300} onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, height: Math.max(150, parseInt(e.target.value) || 150) } } : n))} min="150" />
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">그룹 색상</label>
+                                                        <div className="flex gap-2 mt-2 flex-wrap">
+                                                            {['#94a3b8', '#6366f1', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899'].map(color => (
+                                                                <button key={color} onClick={() => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, color } } : n))} className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${activeNode.data.color === color ? 'border-slate-800 dark:border-white scale-110' : 'border-transparent'}`} style={{ backgroundColor: color }} />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                    <div>
+                                                        <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">포함된 노드 ({(activeNode.data.childNodes || []).length}개)</label>
+                                                        <div className="mt-2 max-h-70 overflow-y-auto bg-slate-50 border border-slate-200 rounded-[3px] dark:bg-zinc-800 dark:border-zinc-700">
+                                                            {(activeNode.data.childNodes || []).length === 0 ? (
+                                                                <div className="p-4 text-center text-slate-400 text-xs">포함된 노드가 없습니다</div>
+                                                            ) : (
+                                                                <div className="divide-y divide-slate-200 dark:divide-zinc-700">
+                                                                    {(activeNode.data.childNodes || []).map(childId => {
+                                                                        const childNode = nodes.find(n => n.id === childId);
+                                                                        if (!childNode) return null;
+                                                                        return (
+                                                                            <div key={childId} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-100 dark:hover:bg-zinc-700 transition-colors">
+                                                                                <span className="text-lg">{childNode.data.emoji || '📄'}</span>
+                                                                                <span className="flex-1 text-sm font-medium text-slate-700 dark:text-zinc-300 truncate">{childNode.label}</span>
+                                                                                <span className="text-[10px] px-2 py-0.5 bg-slate-200 dark:bg-zinc-600 rounded text-slate-500 dark:text-zinc-400">{childNode.type}</span>
+                                                                                <button
+                                                                                    onClick={() => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, childNodes: (n.data.childNodes || []).filter(id => id !== childId) } } : n))}
+                                                                                    className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+                                                                                    title="그룹에서 제거"
+                                                                                >
+                                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                                                                </button>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* 할일 전용 필드 */}
+                                            {activeNode.type === '할일' && (
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">할 일 목록</label>
+                                                    <div className="flex flex-nowrap items-stretch gap-2 mt-1 h-11">
+                                                        <input 
+                                                            type="text" 
+                                                            placeholder="+ 할 일 추가" 
+                                                            className="flex-1 min-w-0 h-full px-3 bg-slate-50 border border-slate-200 text-sm outline-none focus:bg-white transition-all rounded-[3px] dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200"
+                                                            value={todoInput}
+                                                            onChange={(e) => setTodoInput(e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    if (e.nativeEvent.isComposing) return;
+                                                                    e.preventDefault();
+                                                                    if (todoInput.trim()) {
+                                                                        const newItem = { id: generateUUID(), text: todoInput.trim(), done: false };
+                                                                        updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, items: [...(n.data.items || []), newItem] } } : n));
+                                                                        setTodoInput('');
+                                                                    }
+                                                                }
+                                                            }}
+                                                        />
+                                                        <button 
+                                                            onClick={() => {
+                                                                if (todoInput.trim()) {
+                                                                    const newItem = { id: generateUUID(), text: todoInput.trim(), done: false };
+                                                                    updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, items: [...(n.data.items || []), newItem] } } : n));
+                                                                    setTodoInput('');
+                                                                }
+                                                            }}
+                                                            className="shrink-0 whitespace-nowrap h-full px-4 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-[3px] transition-colors"
+                                                        >
+                                                            추가
+                                                        </button>
+                                                    </div>
+                                                    <div className="mt-2 space-y-1">
+                                                        {(activeNode.data.items || []).map(item => (
+                                                            <div key={item.id} className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-[3px] border border-slate-100 dark:bg-zinc-800/50 dark:border-zinc-700 group">
+                                                                <input 
+                                                                    type="checkbox" 
+                                                                    checked={item.done} 
+                                                                    onChange={() => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, items: n.data.items.map(i => i.id === item.id ? { ...i, done: !i.done } : i) } } : n))}
+                                                                    className="w-4 h-4 rounded-sm border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                                                />
+                                                                <span className={`text-sm flex-1 truncate ${item.done ? 'line-through text-slate-400 dark:text-zinc-500' : 'text-slate-700 dark:text-zinc-200'}`}>{item.text}</span>
+                                                                <button 
+                                                                    onClick={() => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, items: n.data.items.filter(i => i.id !== item.id) } } : n))}
+                                                                    className="text-slate-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                                                                >
+                                                                    <IconTrash className="w-4 h-4" />
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                        {(activeNode.data.items || []).length === 0 && (
+                                                            <div className="text-xs text-slate-400 text-center py-4 italic">등록된 할 일이 없습니다</div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* 메모 (할일, 그룹 제외) */}
+                                            {activeNode.type !== '그룹' && activeNode.type !== '할일' && (
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-slate-400 ml-1 uppercase">메모 및 세부 설정</label>
+                                                    <textarea
+                                                        className="w-full mt-1 h-56 p-4 bg-slate-50 border border-slate-200 text-sm outline-none focus:bg-white transition-all resize-none leading-relaxed dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 dark:focus:bg-zinc-700"
+                                                        value={activeNode.data.memo || ''}
+                                                        onChange={e => updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, data: { ...n.data, memo: e.target.value } } : n))}
+
+                                                        placeholder="메모를 입력하세요..."
+                                                    />
+                                                    <AnimatePresence>
+                                                        {activeNode.type === '인물' && isNameGenOpen && (
+                                                            <div className="mobile-hide">
+                                                                <NameGenerator
+                                                                    onClose={() => setIsNameGenOpen(false)}
+                                                                    onConfirm={(name) => {
+                                                                        updateActiveProject(prev => prev.map(n => n.id === activeNode.id ? { ...n, label: name } : n));
+                                                                    }}
+                                                                    settings={nameGenSettings}
+                                                                    onSettingsChange={setNameGenSettings}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                    </AnimatePresence>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="p-6 border-t border-slate-200 dark:border-zinc-700 shrink-0">
+                                        <button onClick={() => { saveHistory(); setSelectedNodeId(null); showToast("설정이 저장되었습니다"); }} className="w-full py-4 bg-slate-900 text-white font-black hover:bg-indigo-600 transition-all uppercase text-xs tracking-widest rounded-[3px] shadow-lg dark:bg-indigo-600 dark:hover:bg-indigo-500">
+                                            저장 후 닫기
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            </>
+                        )}
+                    </AnimatePresence>
+
+                    <AnimatePresence>
+                        {activeEdge && (
+                            <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+                                <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white p-8 rounded-[3px] shadow-2xl w-[420px] relative dark:bg-darkpanel border border-slate-200 dark:border-darkborder">
+                                    <button onClick={() => setSelectedEdgeId(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 transition-colors">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                    </button>
+                                    <h2 className="text-sm font-black text-indigo-500 uppercase tracking-widest mb-8 flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span> 관계선 설정
+                                    </h2>
+                                    <div className="space-y-8">
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-tighter ml-1 mb-2 block">메모</label>
+                                            <input
+                                                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-[3px] font-bold text-sm outline-none focus:border-indigo-500 focus:bg-white transition-all dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 dark:focus:bg-zinc-700/50"
+                                                value={activeEdge.label}
+                                                onChange={e => updateActiveProject(null, prev => prev.map(ev => ev.id === activeEdge.id ? { ...ev, label: e.target.value } : ev))}
+                                            />
+                                        </div>
+                                        <div className="flex gap-6">
+                                            <div className="flex-1">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-tighter ml-1 mb-2 block">선 종류</label>
+                                                <select
+                                                    className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-[3px] font-bold text-xs outline-none cursor-pointer hover:bg-slate-100 transition-colors dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-300"
+                                                    value={activeEdge.style || 'solid'}
+                                                    onChange={e => updateActiveProject(null, prev => prev.map(ev => ev.id === activeEdge.id ? { ...ev, style: e.target.value } : ev))}
+                                                >
+                                                    <option value="solid">─ 실선 (Solid)</option>
+                                                    <option value="dotted">··· 점선 (Dotted)</option>
+                                                    <option value="dashed">--- 파선 (Dashed)</option>
+                                                    <option value="double">══ 이중선 (Double)</option>
+                                                </select>
+                                            </div>
+                                            <div className="flex-[1.2]">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-tighter ml-1 mb-2 block">선 굵기</label>
+                                                <div className="flex items-center h-[42px] bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-[3px] p-1">
+                                                    {[2, 4, 6].map(w => (
+                                                        <button
+                                                            key={w}
+                                                            onClick={() => updateActiveProject(null, prev => prev.map(ev => ev.id === activeEdge.id ? { ...ev, width: w } : ev))}
+                                                            className={`flex-1 h-full flex flex-col items-center justify-center rounded-[2px] transition-all ${(activeEdge.width || 2) === w ? 'bg-white shadow-sm text-indigo-600 dark:bg-zinc-700 dark:text-indigo-400' : 'text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300'}`}
+                                                        >
+                                                            <div className="bg-current rounded-full mb-1" style={{ width: w * 2, height: 2 }}></div>
+                                                            <span className="text-[9px] font-black">{w}px</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => { saveHistory(); setSelectedEdgeId(null); }}
+                                        className="w-full mt-10 py-4 bg-slate-900 text-white font-black rounded-[3px] hover:bg-indigo-600 transition-all uppercase text-[11px] tracking-[0.2em] shadow-lg dark:bg-indigo-600 dark:hover:bg-indigo-500"
+                                    >
+                                        저장 후 닫기
+                                    </button>
+                                </motion.div>
+                            </div>
+                        )}
+                    </AnimatePresence>
+
+                </div >
+            );
+        };
+
+        const SystemSettingsModal = ({ onClose, user, onLogin, onLogout, isDarkMode, toggleDarkMode, fontMode, toggleFont, setFontMode, activeProject, onUpdateProject, focusPosition, setFocusPosition, defaultTargetCount, setDefaultTargetCount, editorWidth, setEditorWidth, editorFontSize, setEditorFontSize, showDocWordCount, setShowDocWordCount, enableHistory, setEnableHistory, cloudAutoSaveInterval, setCloudAutoSaveInterval, nickname, setNickname }) => {
+            const [editingNickname, setEditingNickname] = useState(false);
+            const [draftNickname, setDraftNickname] = useState(nickname);
+
+            return (
+                <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-white dark:bg-darkpanel p-8 rounded-sm shadow-2xl w-[450px] border border-slate-200 dark:border-zinc-700"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between mb-8">
+                            <h2 className="text-xl font-black text-slate-800 dark:text-zinc-100 flex items-center gap-2">
+                                <IconSettings className="w-5 h-5 text-indigo-500" />
+                                시스템 설정
+                            </h2>
+                            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+
+                         <div className="mb-8 p-3 rounded-lg border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-900 shadow-sm">
+                            {user ? (
+                                <div className="space-y-3">
+                                    <div className="flex items-center gap-3">
+                                        <div className="h-9 w-9 rounded-full overflow-hidden border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shrink-0">
+                                            {user.picture ? (
+                                                <img src={user.picture} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                                            ) : (
+                                                <div className="flex h-full w-full items-center justify-center text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30">
+                                                    <IconGoogle className="w-4 h-4" />
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="truncate text-sm text-slate-500 dark:text-zinc-400">{user.email || 'Google 계정'}</p>
+                                        </div>
+                                        <button
+                                            onClick={onLogout}
+                                            className="shrink-0 rounded-lg bg-red-600 px-3 py-1.5 text-[10px] font-black text-white hover:bg-red-700 transition-colors"
+                                        >
+                                            로그아웃
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {editingNickname ? (
+                                            <>
+                                                <div className="flex-1">
+                                                    <label className="block text-[9px] font-black text-slate-400 dark:text-zinc-500 uppercase tracking-wider mb-1">필명 (닉네임)</label>
+                                                    <input
+                                                        type="text"
+                                                        value={draftNickname}
+                                                        onChange={(e) => setDraftNickname(e.target.value)}
+                                                        className="w-full py-1 px-2 bg-white dark:bg-zinc-800 border border-indigo-500 rounded-md text-sm font-bold text-slate-900 dark:text-zinc-100 focus:outline-none transition-colors"
+                                                        placeholder={user.name || '닉네임 입력'}
+                                                        autoFocus
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') { setNickname(draftNickname); setEditingNickname(false); }
+                                                            if (e.key === 'Escape') { setDraftNickname(nickname); setEditingNickname(false); }
+                                                        }}
+                                                    />
+                                                </div>
+                                                <button
+                                                    onClick={() => { setNickname(draftNickname); setEditingNickname(false); }}
+                                                    className="shrink-0 self-end rounded-md bg-indigo-600 px-3 py-2 text-[10px] font-black text-white hover:bg-indigo-700 transition-colors"
+                                                >
+                                                    저장
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="flex-1">
+                                                    <label className="block text-[9px] font-black text-slate-400 dark:text-zinc-500 uppercase tracking-wider mb-1">필명 (닉네임)</label>
+                                                    <p className="text-sm font-bold text-slate-900 dark:text-zinc-100">{nickname || user.name || '—'}</p>
+                                                </div>
+                                                <button
+                                                    onClick={() => { setDraftNickname(nickname); setEditingNickname(true); }}
+                                                    className="shrink-0 self-end rounded-md bg-slate-200 dark:bg-zinc-700 px-3 py-2 text-[10px] font-black text-slate-600 dark:text-zinc-300 hover:bg-slate-300 dark:hover:bg-zinc-600 transition-colors"
+                                                >
+                                                    수정
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="flex items-center justify-between gap-3">
+                                    <p className="text-sm text-slate-500 dark:text-zinc-400">Drive 백업 및 동기화</p>
+                                    <button
+                                        onClick={onLogin}
+                                        className="shrink-0 rounded-lg bg-indigo-600 px-4 py-1.5 text-[10px] font-black text-white hover:bg-indigo-700 transition-colors"
+                                    >
+                                        Google 연결
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="space-y-10">
+
+
+                            {/* 외관 설정 섹션 */}
+                            <section>
+                                <div className="grid grid-cols-[1fr_auto_1fr] gap-6 items-center">
+                                    <div className="flex items-center justify-between">
+                                        <div className="text-sm font-black text-slate-700 dark:text-zinc-200">테마</div>
+                                        <button
+                                            onClick={toggleDarkMode}
+                                            className={`w-24 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-sm font-black text-[10px] transition-all ${isDarkMode ? 'bg-zinc-800 text-zinc-300 border border-zinc-700' : 'bg-white text-slate-600 border border-slate-200 shadow-sm'}`}
+                                        >
+                                            {isDarkMode ? <><IconMoon className="w-3 h-3" /> 다크</> : <><IconSun className="w-3 h-3" /> 라이트</>}
+                                        </button>
+                                    </div>
+                                    <div className="w-px h-4 bg-slate-200 dark:bg-zinc-700"></div>
+                                    <div className="flex items-center justify-between">
+                                        <div className="text-sm font-black text-slate-700 dark:text-zinc-200">폰트</div>
+                                        <div className="relative w-24">
+                                            <select
+                                                value={fontMode}
+                                                onChange={(e) => setFontMode(e.target.value)}
+                                                className="w-full appearance-none flex items-center justify-center gap-1.5 pl-6 pr-2 py-1.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-sm font-black text-[10px] hover:bg-indigo-100 transition-all dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800 cursor-pointer focus:outline-none"
+                                            >
+                                                {Object.keys(FONT_DISPLAY_NAMES).map((key) => (
+                                                    <option key={key} value={key}>{FONT_DISPLAY_NAMES[key]}</option>
+                                                ))}
+                                            </select>
+                                            <IconFont className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            {/* 편집기 설정 섹션 */}
+                            <section>
+                                <div className="flex items-center justify-between mb-5 border-b border-slate-100 dark:border-zinc-800 pb-2">
+                                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Editor Settings</h3>
+                                    <button
+                                        onClick={() => {
+                                            setEditorWidth('default');
+                                            setEditorFontSize(18);
+                                            setDefaultTargetCount(5000);
+                                            setFocusPosition(0.5);
+                                            setShowDocWordCount(false);
+                                            setEnableHistory(false);
+                                        }}
+                                        className="text-slate-400 hover:text-indigo-500 transition-colors"
+                                        title="기본값으로 초기화"
+                                    >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
+                                    </button>
+                                </div>
+                                <div className="space-y-7">
+                                    <div className="flex items-center justify-between">
+                                        <div className="text-sm font-black text-slate-700 dark:text-zinc-200">에디터 너비</div>
+                                        <div className="flex gap-1.5">
+                                            {[
+                                                { value: 'narrow', label: '좁음' },
+                                                { value: 'default', label: '기본' },
+                                                { value: 'wide', label: '넓음' }
+                                            ].map(opt => (
+                                                <button
+                                                    key={opt.value}
+                                                    onClick={() => setEditorWidth(opt.value)}
+                                                    className={`px-3 py-1.5 rounded-sm text-[11px] font-black transition-all ${editorWidth === opt.value ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600'}`}
+                                                >
+                                                    {opt.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-[1fr_auto_1fr] gap-6 items-center">
+                                        <div className="flex items-center justify-between">
+                                            <div className="text-sm font-black text-slate-700 dark:text-zinc-200">글자 크기</div>
+                                            <div className="flex items-center gap-1">
+                                                <input
+                                                    type="number"
+                                                    className="w-12 px-1 py-1 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-sm font-black text-[10px] text-right outline-none focus:border-indigo-500 text-slate-800 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                    value={editorFontSize}
+                                                    onChange={(e) => setEditorFontSize(parseInt(e.target.value) || 18)}
+                                                />
+                                                <span className="text-[9px] font-black text-slate-400">PX</span>
+                                            </div>
+                                        </div>
+                                        <div className="w-px h-4 bg-slate-200 dark:bg-zinc-700"></div>
+                                        <div className="flex items-center justify-between">
+                                            <div className="text-sm font-black text-slate-700 dark:text-zinc-200">목표 자수</div>
+                                            <div className="flex items-center gap-1">
+                                                <input
+                                                    type="number"
+                                                    className="w-16 px-1 py-1 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-sm font-black text-[10px] text-right outline-none focus:border-indigo-500 text-slate-800 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                    value={defaultTargetCount || 5000}
+                                                    onChange={(e) => setDefaultTargetCount(parseInt(e.target.value) || 0)}
+                                                />
+                                                <span className="text-[9px] font-black text-slate-400">자</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-[1fr_auto_1fr] gap-6 items-center">
+                                        <div className="flex items-center justify-between">
+                                            <div className="text-sm font-black text-slate-700 dark:text-zinc-200">리스트 글자수 표시</div>
+                                            <button
+                                                onClick={() => setShowDocWordCount(!showDocWordCount)}
+                                                className={`w-10 h-5 rounded-full transition-all relative shrink-0 ${showDocWordCount ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-zinc-600'}`}
+                                            >
+                                                <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${showDocWordCount ? 'left-5' : 'left-0.5'}`} />
+                                            </button>
+                                        </div>
+                                        <div className="w-px h-4 bg-slate-200 dark:bg-zinc-700"></div>
+                                        <div className="flex items-center justify-between">
+                                            <div className="text-sm font-black text-slate-700 dark:text-zinc-200">히스토리 기능</div>
+                                            <button
+                                                onClick={() => setEnableHistory(!enableHistory)}
+                                                className={`w-10 h-5 rounded-full transition-all relative shrink-0 ${enableHistory ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-zinc-600'}`}
+                                            >
+                                                <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${enableHistory ? 'left-5' : 'left-0.5'}`} />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-end">
+                                            <div>
+                                                <div className="text-sm font-black text-slate-700 dark:text-zinc-200">집중 모드 포커스 높이</div>
+                                            </div>
+                                            <span className="text-xs font-black text-indigo-600 dark:text-indigo-400">{Math.round(focusPosition * 100)}%</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0.1"
+                                            max="0.9"
+                                            step="0.05"
+                                            value={focusPosition}
+                                            onChange={(e) => setFocusPosition(parseFloat(e.target.value))}
+                                            className="w-full h-1.5 bg-slate-100 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                        />
+                                        <div className="flex justify-between text-[9px] font-bold text-slate-400 uppercase tracking-tighter">
+                                            <span>상단</span>
+                                            <span>중앙 (50%)</span>
+                                            <span>하단</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+
+                        <div className="mt-10 pt-6 border-t border-slate-100 dark:border-zinc-800 space-y-4">
+
+
+                            <button
+                                onClick={onClose}
+                                className="w-full py-4 bg-slate-900 hover:bg-indigo-600 text-white text-xs font-black rounded-sm shadow-md transition-all uppercase tracking-[0.2em] dark:bg-indigo-600 dark:hover:bg-indigo-500 active:scale-[0.98]"
+                            >
+                                저장 및 닫기
+                            </button>
+                        </div>
+                    </motion.div>
+                </div>
+            );
+        };
+
+        // Landing Page (Minimalist & Literary Redesign)
+        const Landing = ({ onLogin, onGuestEnter }) => {
+            return (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-[#fdfbf7] dark:bg-[#0c0c0c] p-6 relative overflow-hidden transition-colors duration-1000">
+                    
+                    <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 1.5, ease: "easeInOut" }}
+                        className="max-w-md w-full z-10 flex flex-col items-center"
+                    >
+                        {/* 로고 & 아이콘 */}
+                        <motion.div 
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ duration: 1, delay: 0.2 }}
+                            className="mb-12 relative group cursor-default"
+                        >
+                            <div className="absolute inset-0 bg-indigo-500/20 dark:bg-indigo-500/10 blur-[40px] rounded-full scale-150 opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
+                            <img src="sagak_icon.png" className="w-20 h-20 rounded-[20px] shadow-2xl relative z-10" />
+                        </motion.div>
+
+                        {/* 메인 타이틀 (명조체) */}
+                        <motion.div
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ duration: 1, delay: 0.5 }}
+                            className="text-center mb-16 space-y-6"
+                        >
+                            <h1 className="text-4xl md:text-5xl font-Ridibatang font-bold text-slate-900 dark:text-zinc-100 tracking-tight leading-tight">
+                                사각, 생각의 소리
+                            </h1>
+                            <p className="font-Ridibatang text-sm md:text-base text-slate-500 dark:text-zinc-500 leading-loose tracking-wide">
+                                흩어진 문장들이 모여 하나의 세계가 되는 곳.<br/>
+                                오직 당신의 이야기에만 집중하세요.
+                            </p>
+                        </motion.div>
+
+                        {/* 로그인 버튼 */}
+                        <motion.div 
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ duration: 1, delay: 0.8 }}
+                            className="w-full px-4 space-y-3"
+                        >
+                            <button
+                                onClick={onLogin}
+                                className="w-full py-4 bg-transparent border border-slate-300 dark:border-zinc-800 rounded-sm text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:border-slate-800 dark:hover:border-zinc-500 transition-all duration-500 flex items-center justify-center gap-3 group relative overflow-hidden"
+                            >
+                                <span className="absolute inset-0 bg-slate-50 dark:bg-zinc-900 translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-in-out -z-10"></span>
+                                <svg className="w-4 h-4 transition-transform duration-500 group-hover:scale-110" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="currentColor"/>
+                                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="currentColor"/>
+                                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="currentColor"/>
+                                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="currentColor"/>
+                                </svg>
+                                <span className="font-Ridibatang text-sm">구글 계정으로 입장하기</span>
+                            </button>
+
+                            {onGuestEnter && (
+                                <button
+                                    onClick={onGuestEnter}
+                                    className="w-full py-2.5 text-xs text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 font-Ridibatang transition-colors text-center block"
+                                >
+                                    로그인 없이 서재 둘러보기 (로컬 전용)
+                                </button>
+                            )}
+                        </motion.div>
+
+                        {/* 하단 카피 */}
+                        <motion.div 
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ duration: 1, delay: 1.2 }}
+                            className="absolute bottom-10 text-[10px] text-slate-300 dark:text-zinc-700 font-serif tracking-widest uppercase"
+                        >
+                            Sagak Studio
+                        </motion.div>
+                    </motion.div>
+                </div>
+            );
+        };
+
+        const Library = ({ books, user, onLogin, onLogout, onSelectBook, onCreateBook, onDeleteBook, onUpdateBook, onImport, onReorderBooks, onCloudUpload, onCloudDownload, isDarkMode, toggleDarkMode, setIsDarkMode, fontMode, toggleFont, setFontMode, focusPosition, setFocusPosition, defaultTargetCount, setDefaultTargetCount, editorWidth, setEditorWidth, editorFontSize, setEditorFontSize, showDocWordCount, setShowDocWordCount, enableHistory, setEnableHistory, cloudAutoSaveInterval, setCloudAutoSaveInterval, nickname, setNickname, cloudImportData, onClearCloudImport }) => {
+            const [modalConfig, setModalConfig] = useState({ isOpen: false, mode: 'create', targetBook: null });
+            const [showSystemSettings, setShowSystemSettings] = useState(false);
+            const [viewMode, setViewMode] = useState(() => localStorage.getItem('libraryViewMode') || 'cover');
+            useEffect(() => { localStorage.setItem('libraryViewMode', viewMode); }, [viewMode]);
+
+            // ------------------------------------------------------------
+            // 데스크탑 웹앱 설치 버튼
+            // ------------------------------------------------------------
+            // 이미 데스크탑 크롬/엣지 등에서는 beforeinstallprompt 이벤트를
+            // 브라우저가 알아서 쏴주지만, 그 이벤트를 우리가 잡아두지 않으면
+            // "설치" 버튼을 못 띄워요. index.html head 쪽에서 미리 이벤트를
+            // 가로채 window.__sagakInstallPrompt에 저장해두므로, 여기서는
+            // 그 값을 읽어와 버튼 노출 여부만 결정합니다.
+            const [installPromptEvent, setInstallPromptEvent] = useState(() => window.__sagakInstallPrompt || null);
+            const [isAppInstalled, setIsAppInstalled] = useState(
+                () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true
+            );
+            const isDesktopDevice = useMemo(() => {
+                const ua = navigator.userAgent || '';
+                const isMobileUA = /Android|iPhone|iPad|iPod|Mobi/i.test(ua);
+                const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+                return !isMobileUA && !isCoarsePointer;
+            }, []);
+
+            useEffect(() => {
+                const handlePromptCaptured = (e) => setInstallPromptEvent(e.detail);
+                const handleInstalled = () => { setIsAppInstalled(true); setInstallPromptEvent(null); };
+                window.addEventListener('sagak-install-prompt-ready', handlePromptCaptured);
+                window.addEventListener('appinstalled', handleInstalled);
+                return () => {
+                    window.removeEventListener('sagak-install-prompt-ready', handlePromptCaptured);
+                    window.removeEventListener('appinstalled', handleInstalled);
+                };
+            }, []);
+
+            const handleInstallClick = async () => {
+                if (!installPromptEvent) return;
+                installPromptEvent.prompt();
+                try {
+                    await installPromptEvent.userChoice;
+                } catch (e) { /* 사용자가 그냥 닫아도 무시 */ }
+                // 프롬프트는 1회용이라 사용 후 비워줍니다.
+                window.__sagakInstallPrompt = null;
+                setInstallPromptEvent(null);
+            };
+
+            const showInstallButton = isDesktopDevice && !isAppInstalled && !!installPromptEvent;
+
+
+            const quote = useMemo(() => {
+                const quotes = [
+                    { "author": "어니스트 헤밍웨이", "quote": "모든 초고는 쓰레기다." },
+                    { "author": "안톤 체호프", "quote": "달이 빛난다고 말하지 말고, 깨진 유리 조각에 비치는 빛을 보여줘라." },
+                    { "author": "프란츠 카프카", "quote": "책은 우리 내면의 얼어붙은 바다를 깨는 도끼여야 한다." },
+                    { "author": "조디 피콜트", "quote": "나쁜 글은 고칠 수 있지만, 빈 페이지는 고칠 수 없다." },
+                    { "author": "토니 모리슨", "quote": "읽고 싶은 책이 있는데 아직 쓰이지 않았다면, 당신이 직접 써야 한다." },
+                    { "author": "커트 보니것", "quote": "낯선 사람의 시간을 낭비하지 않도록 글을 써라." },
+                    { "author": "앤 라모트", "quote": "인생이 갈지자로 비틀거리거나 마구 짓밟힐 때 조차 그 모든 상황이 관찰의 대상이 된다." },
+                    { "author": "플래너리 오코너", "quote": "작가는 관찰하는 사람이다. 눈앞의 세상을 정직하게 응시하는 법부터 배워라." },
+                    { "author": "무라카미 하루키", "quote": "글쓰기는 자기 자신을 향한 정직한 노동이다." },
+                    { "author": "잭 하트", "quote": "위대한 문장의 신화는 없다. 글쓰기는 마술이 아니라 기술이다." },
+                    { "author": "애거사 크리스티", "quote": "설거지를 하다가 최고의 아이디어가 떠오른다." },
+                    { "author": "랄프 왈도 에머슨", "quote": "자신의 생각을 믿는 것, 그것이 천재성이다." },
+                    { "author": "E.B. 화이트", "quote": "글을 쓰는 것은 믿음의 행위이지, 요령의 행위가 아니다." },
+                    { "author": "장 폴 사르트르", "quote": "글쓰기는 세계에 질문을 던지는 방식이다." },
+                    { "author": "블라디미르 나보코프", "quote": "최고의 작가는 마법사다." },
+                    { "author": "표도르 도스토옙스키", "quote": "작가는 영혼의 해부학자다." },
+                    { "author": "스티븐 킹", "quote": "많이 읽고, 많이 써라. 지름길은 없다." },
+                    { "author": "미야자키 하야오", "quote": "판타지에는 리얼리티가 필요하고, 리얼리티에는 판타지가 필요하다." },
+                    { "author": "스티븐 킹", "quote": "여러분이 해야 할 일은 날마다 작업을 한다는 사실을 뮤즈에게 알려주는 것이다." },
+                    { "author": "앨런 무어", "quote": "예술은 사람들의 인식을 바꾸는 유일한 도구다." },
+                    { "author": "월트 휘트먼", "quote": "단순함은 모든 예술의 마지막 단계다." },
+                    { "author": "제임스 디키", "quote": "글을 쓰는 것은 어둠 속에서 빛을 찾는 과정이다." },
+                    { "author": "조안 디디온", "quote": "내가 무슨 생각을 하는지 알기 위해 나는 글을 쓴다." },
+                    { "author": "작자 미상", "quote": "작품은 세계에 대한 작가의 논문이다." },
+                    { "author": "앤 라모트", "quote": "완벽주의는 당신의 글쓰기를 망치고, 창조성과 장난기와 생명력을 방해한다." },
+                    { "author": "앤 라모트", "quote": "좋은 글쓰기는 진실을 말하는 것이다." }
+                ];
+                return quotes[Math.floor(Math.random() * quotes.length)];
+            }, []);
+
+            // 드래그 앤 드롭 상태
+            const [dragState, setDragState] = useState({ draggingId: null, overId: null });
+            const dragDataRef = useRef({ draggingId: null, overId: null });
+
+            const handleDragStart = (e, bookId) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', bookId);
+                dragDataRef.current = { draggingId: bookId, overId: null };
+                setTimeout(() => {
+                    setDragState({ draggingId: bookId, overId: null });
+                }, 0);
+            };
+
+            const handleDragOver = (e, overId) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (dragDataRef.current.draggingId && dragDataRef.current.draggingId !== overId) {
+                    if (dragDataRef.current.overId !== overId) {
+                        dragDataRef.current.overId = overId;
+                        setDragState(prev => ({ ...prev, overId }));
+                    }
+                }
+            };
+
+            const handleDrop = (e, dropId) => {
+                e.preventDefault();
+                const dragId = e.dataTransfer.getData('text/plain') || dragDataRef.current.draggingId;
+
+                if (dragId && dropId && dragId !== dropId) {
+                    const dragIndex = books.findIndex(b => b.id === dragId);
+                    const dropIndex = books.findIndex(b => b.id === dropId);
+
+                    if (dragIndex !== -1 && dropIndex !== -1) {
+                        const newBooks = [...books];
+                        const [removed] = newBooks.splice(dragIndex, 1);
+                        newBooks.splice(dropIndex, 0, removed);
+                        onReorderBooks(newBooks);
+                    }
+                }
+                dragDataRef.current = { draggingId: null, overId: null };
+                setDragState({ draggingId: null, overId: null });
+            };
+
+            const handleDragEnd = () => {
+                dragDataRef.current = { draggingId: null, overId: null };
+                setDragState({ draggingId: null, overId: null });
+            };
+
+            // FilePanel 상태
+            const [filePanel, setFilePanel] = useState({ isOpen: false, mode: 'save' }); // mode: 'save' | 'load'
+            const [importData, setImportData] = useState(null);
+            const [fileMenuOpen, setFileMenuOpen] = useState(false);
+            const fileMenuRef = useRef(null);
+
+            const openSavePanel = () => {
+                setFilePanel({ isOpen: true, mode: 'save' });
+                setImportData(null);
+            };
+
+            const openLoadPanel = () => {
+                setFilePanel({ isOpen: true, mode: 'load' });
+                setImportData(null);
+            };
+
+            const closeFilePanel = () => {
+                setFilePanel({ isOpen: false, mode: filePanel.mode });
+                setImportData(null);
+            };
+
+            useEffect(() => {
+                const handleClickOutside = (e) => {
+                    if (fileMenuRef.current && !fileMenuRef.current.contains(e.target)) {
+                        setFileMenuOpen(false);
+                    }
+                };
+
+                document.addEventListener('mousedown', handleClickOutside);
+                return () => document.removeEventListener('mousedown', handleClickOutside);
+            }, []);
+
+            const handleLocalSaveClick = () => {
+                setFileMenuOpen(false);
+                openSavePanel();
+            };
+
+            const handleLocalLoadClick = () => {
+                setFileMenuOpen(false);
+                openLoadPanel();
+            };
+
+            const handleCloudSaveMenuClick = async () => {
+                setFileMenuOpen(false);
+                await handleCloudSaveClick();
+            };
+
+            const handleCloudLoadMenuClick = async () => {
+                setFileMenuOpen(false);
+                await handleCloudLoadClick();
+            };
+
+            const handleExportFromPanel = async (filename, exportType, password) => {
+                const jsonString = JSON.stringify(books);
+
+                if (exportType === 'vel') {
+                    // 암호화 저장
+                    const encrypted = await window.SagakCrypto.encrypt(jsonString, password);
+                    const blob = new Blob([encrypted], { type: "text/plain;charset=utf-8" });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `${filename}.vel`;
+                    link.click();
+                    URL.revokeObjectURL(link.href);
+                } else {
+                    // 일반 JSON 저장
+                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonString);
+                    const downloadAnchorNode = document.createElement('a');
+                    downloadAnchorNode.setAttribute("href", dataStr);
+                    downloadAnchorNode.setAttribute("download", `${filename}.json`);
+                    document.body.appendChild(downloadAnchorNode);
+                    downloadAnchorNode.click();
+                    downloadAnchorNode.remove();
+                }
+            };
+
+            const handleFileSelectFromPanel = (file) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const fileContent = e.target.result;
+                    let isEncrypted = false;
+
+                    try {
+                        JSON.parse(fileContent);
+                        isEncrypted = false;
+                    } catch (jsonError) {
+                        isEncrypted = true;
+                    }
+
+                    setImportData({ content: fileContent, isEncrypted });
+                };
+                reader.readAsText(file);
+            };
+
+            const handleConfirmImportFromPanel = (data, shouldReplace) => {
+                if (data && Array.isArray(data)) {
+                    onImport(data, shouldReplace);
+                    // cloudImportMeta가 있으면 적용
+                    if (cloudImportMeta) {
+                        if (cloudImportMeta.nickname) setNickname(cloudImportMeta.nickname);
+                        if (cloudImportMeta.isDarkMode !== undefined) setIsDarkMode(cloudImportMeta.isDarkMode);
+                        if (cloudImportMeta.fontMode) setFontMode(cloudImportMeta.fontMode);
+                        if (cloudImportMeta.focusPosition !== undefined) setFocusPosition(cloudImportMeta.focusPosition);
+                        if (cloudImportMeta.defaultTargetCount) setDefaultTargetCount(cloudImportMeta.defaultTargetCount);
+                        if (cloudImportMeta.editorWidth) setEditorWidth(cloudImportMeta.editorWidth);
+                        if (cloudImportMeta.editorFontSize) setEditorFontSize(cloudImportMeta.editorFontSize);
+                        if (cloudImportMeta.showDocWordCount !== undefined) setShowDocWordCount(cloudImportMeta.showDocWordCount);
+                        if (cloudImportMeta.enableHistory !== undefined) setEnableHistory(cloudImportMeta.enableHistory);
+                        if (cloudImportMeta.cloudAutoSaveInterval) setCloudAutoSaveInterval(cloudImportMeta.cloudAutoSaveInterval);
+                        setCloudImportMeta(null);
+                    }
+                } else {
+                    alert("올바르지 않은 데이터 형식입니다.");
+                }
+            };
+
+            const [cloudLoading, setCloudLoading] = useState(false);
+            const [cloudImportMeta, setCloudImportMeta] = useState(null);
+
+            // cloudImportData가 전달되면 FilePanel로 연결
+            useEffect(() => {
+                if (cloudImportData) {
+                    const { data, bookData } = cloudImportData;
+                    setCloudImportMeta(data && data.meta ? data.meta : null);
+                    setImportData({ content: JSON.stringify(bookData), isEncrypted: false });
+                    setFilePanel({ isOpen: true, mode: 'load' });
+                    onClearCloudImport();
+                }
+            }, [cloudImportData]);
+
+            const handleCloudSaveClick = async () => {
+                setCloudLoading(true);
+                try { await onCloudUpload(); } finally { setCloudLoading(false); }
+            };
+
+            const handleCloudLoadClick = async () => {
+                setCloudLoading(true);
+                try {
+                    const data = await onCloudDownload();
+                    if (!data) return;
+                    setImportData({ content: JSON.stringify(data), isEncrypted: false });
+                    setFilePanel({ isOpen: true, mode: 'load' });
+                } finally {
+                    setCloudLoading(false);
+                }
+            };
+
+            // ... 나머지 코드는 기존과 동일 ...
+            const handleConfirmModal = (title, author, color, coverImage) => {
+                // (기존 코드 유지)
+                if (modalConfig.mode === 'create') {
+                    const newId = generateUUID();
+                    const defaultProjectId = generateUUID();
+                    const newBook = {
+                        id: newId, title, author, color, coverImage,
+                        projects: [{ id: defaultProjectId, type: 'board', name: '새 보드', nodes: [], edges: [] }],
+                        activeProjectId: defaultProjectId
+                    };
+                    onCreateBook(newBook);
+                } else {
+                    onUpdateBook({ ...modalConfig.targetBook, title, author, color, coverImage });
+                }
+                setModalConfig({ isOpen: false, mode: 'create', targetBook: null });
+            };
+
+            // 통계 계산
+            const stats = useMemo(() => {
+                let totalChars = 0;
+                let totalDocs = 0;
+                let totalNodes = 0;
+                let completedDocs = 0;
+
+                books.forEach(book => {
+                    (book.projects || []).forEach(project => {
+                        if (project.type === 'doc') {
+                            totalDocs++;
+                            totalChars += (project.content || '').length;
+                            if (project.status === '완료') completedDocs++;
+                        } else if (project.type === 'board') {
+                            totalNodes += (project.nodes || []).length;
+                        }
+                    });
+                });
+
+                return { totalChars, totalDocs, totalNodes, completedDocs };
+            }, [books]);
+
+            // 시간대별 인사말
+            const greeting = useMemo(() => {
+                const hour = new Date().getHours();
+                if (hour >= 5 && hour < 12) return { text: '좋은 아침이에요', emoji: '🌅', sub: '오늘도 좋은 글이 탄생하길' };
+                if (hour >= 12 && hour < 17) return { text: '좋은 오후예요', emoji: '☀️', sub: '잠시 커피 한 잔 어떠세요?' };
+                if (hour >= 17 && hour < 21) return { text: '좋은 저녁이에요', emoji: '🌆', sub: '오늘 하루도 수고했어요' };
+                return { text: '고요한 밤이에요', emoji: '🌙', sub: '야행성 작가님, 무리하지 마세요' };
+            }, []);
+
+            return (
+                <div className="w-full h-full overflow-hidden flex flex-col transition-colors duration-500 bg-slate-100 dark:bg-zinc-950">
+                    {modalConfig.isOpen && (<BookSettingsModal initialData={modalConfig.targetBook} onClose={() => setModalConfig({ isOpen: false, mode: 'create', targetBook: null })} onConfirm={handleConfirmModal} onDelete={onDeleteBook} />)}
+                    {showSystemSettings && (
+                        <SystemSettingsModal
+                            onClose={() => setShowSystemSettings(false)}
+                            user={user}
+                            onLogin={onLogin}
+                            onLogout={onLogout}
+                            isDarkMode={isDarkMode}
+                            toggleDarkMode={toggleDarkMode}
+                            fontMode={fontMode}
+                            toggleFont={toggleFont}
+                            setFontMode={setFontMode}
+                            focusPosition={focusPosition}
+                            setFocusPosition={setFocusPosition}
+                            defaultTargetCount={defaultTargetCount}
+                            setDefaultTargetCount={setDefaultTargetCount}
+                            editorWidth={editorWidth}
+                            setEditorWidth={setEditorWidth}
+                            editorFontSize={editorFontSize}
+                            setEditorFontSize={setEditorFontSize}
+                            showDocWordCount={showDocWordCount}
+                            setShowDocWordCount={setShowDocWordCount}
+                            enableHistory={enableHistory}
+                            setEnableHistory={setEnableHistory}
+                            cloudAutoSaveInterval={cloudAutoSaveInterval}
+                            setCloudAutoSaveInterval={setCloudAutoSaveInterval}
+                            nickname={nickname}
+                            setNickname={setNickname}
+                        />
+                    )}
+
+                    {/* FilePanel - 내부 창 */}
+                    <AnimatePresence>
+                        {filePanel.isOpen && (
+                            <>
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="fixed inset-0 bg-black/20 z-[99]"
+                                    onClick={closeFilePanel}
+                                />
+                                <FilePanel
+                                    isOpen={filePanel.isOpen}
+                                    mode={filePanel.mode}
+                                    onClose={closeFilePanel}
+                                    books={books}
+                                    onExport={handleExportFromPanel}
+                                    onFileSelect={handleFileSelectFromPanel}
+                                    importData={importData}
+                                    onConfirmImport={handleConfirmImportFromPanel}
+                                />
+                            </>
+                        )}
+                    </AnimatePresence>
+
+                    {/* 헤더 */}
+                    <header className="h-14 px-8 flex items-center justify-between bg-white dark:bg-zinc-900 sticky top-0 z-50 border-b border-slate-200 dark:border-zinc-800">
+                        <div className="flex items-center gap-3">
+                            <img src="sagak_icon.png" className="w-8 h-8 rounded-sm shadow-md object-cover" alt="Logo" />
+                            <div>
+                                <span className="text-base font-black tracking-tight text-slate-800 dark:text-zinc-100">썸머 에디터 v1.2</span>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {showInstallButton && (
+                                <button
+                                    type="button"
+                                    onClick={handleInstallClick}
+                                    className="h-8 flex items-center gap-1.5 px-3 rounded-sm border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-300 text-xs font-black hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+                                    title="앱으로 설치"
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M4 21h16" /></svg>
+                                    앱 설치
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setShowSystemSettings(true)}
+                                className="h-8 w-8 rounded-sm border border-slate-200 dark:border-zinc-700 flex items-center justify-center text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                                title="옵션"
+                            >
+                                <IconSettings className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </header>
+
+                    <div className="flex-1 overflow-y-auto custom-scroll">
+                        {/* 메인 콘텐츠 */}
+                        <div className="max-w-7xl mx-auto px-10 pt-12 pb-8">
+                            {/* 인사말 */}
+                            <motion.div
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="mb-8 flex items-end justify-between"
+                            >
+                                <div className="flex items-center gap-4">
+                                    <span className="text-3xl">{greeting.emoji}</span>
+                                    <div>
+                                        <h1 className="text-2xl font-black text-slate-800 dark:text-zinc-100 tracking-tight">{greeting.text}</h1>
+                                        <p className="text-slate-500 dark:text-zinc-500 text-sm">{greeting.sub}</p>
+                                    </div>
+                                </div>
+                                {quote && (
+                                    <div className="text-right max-w-md hidden md:block pb-1">
+                                        <p className="text-[13px] font-bold text-slate-600 dark:text-zinc-400 italic">"{quote.quote}"</p>
+                                        <p className="text-[10px] text-slate-400 dark:text-zinc-500 mt-1 font-black uppercase tracking-wider">- {quote.author}</p>
+                                    </div>
+                                )}
+                            </motion.div>
+
+                            {/* 통계 카드 */}
+                            <motion.div
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.1 }}
+                                className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10"
+                            >
+                                <div className="bg-white dark:bg-zinc-900 rounded-lg p-4 border border-slate-200 dark:border-zinc-800">
+                                    <div className="text-slate-400 dark:text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">총 작품수</div>
+                                    <div className="text-2xl font-black text-slate-800 dark:text-zinc-100">{books.length}</div>
+                                    <div className="text-slate-400 dark:text-zinc-500 text-xs mt-0.5">편의 소설</div>
+                                </div>
+                                <div className="bg-white dark:bg-zinc-900 rounded-lg p-4 border border-slate-200 dark:border-zinc-800">
+                                    <div className="text-slate-400 dark:text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">총 글자수</div>
+                                    <div className="text-2xl font-black text-slate-800 dark:text-zinc-100">{stats.totalChars.toLocaleString()}</div>
+                                    <div className="text-slate-400 dark:text-zinc-500 text-xs mt-0.5">자를 썼어요</div>
+                                </div>
+                                <div className="bg-white dark:bg-zinc-900 rounded-lg p-4 border border-slate-200 dark:border-zinc-800">
+                                    <div className="text-slate-400 dark:text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">아이디어</div>
+                                    <div className="text-2xl font-black text-slate-800 dark:text-zinc-100">{stats.totalNodes}</div>
+                                    <div className="text-slate-400 dark:text-zinc-500 text-xs mt-0.5">개의 노드</div>
+                                </div>
+                                <div className="bg-white dark:bg-zinc-900 rounded-lg p-4 border border-slate-200 dark:border-zinc-800">
+                                    <div className="text-slate-400 dark:text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">완료된 원고</div>
+                                    <div className="text-2xl font-black text-slate-800 dark:text-zinc-100">{stats.completedDocs}</div>
+                                    <div className="text-slate-400 dark:text-zinc-500 text-xs mt-0.5">/ {stats.totalDocs} 문서</div>
+                                </div>
+                            </motion.div>
+
+                            {/* 책장 섹션 */}
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-1 h-6 bg-indigo-500 rounded-full"></div>
+                                    <h2 className="text-lg font-bold text-slate-700 dark:text-zinc-200">
+                                        {user ? `${nickname || user.name}님의 서재` : '내 서재'}
+                                    </h2>
+                                    <span className="text-xs font-bold text-slate-400 dark:text-zinc-500 bg-slate-100 dark:bg-zinc-800 px-2 py-1 rounded-[3px]">{books.length}권</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <div className="h-8 flex items-center bg-slate-100 dark:bg-zinc-800 rounded-sm p-0.5">
+                                        <button
+                                            onClick={() => setViewMode('cover')}
+                                            className={`h-7 px-2 flex items-center gap-1.5 rounded-sm transition-all text-sm font-medium ${viewMode === 'cover' ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-200'}`}
+                                            title="커버로 보기"
+                                        >
+                                            <IconLayout className="w-4 h-4" />
+                                            <span className="hidden lg:inline">커버</span>
+                                        </button>
+                                        <button
+                                            onClick={() => setViewMode('list')}
+                                            className={`h-7 px-2 flex items-center gap-1.5 rounded-sm transition-all text-sm font-medium ${viewMode === 'list' ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-200'}`}
+                                            title="목록으로 보기"
+                                        >
+                                            <IconList className="w-4 h-4" />
+                                            <span className="hidden lg:inline">목록</span>
+                                        </button>
+                                    </div>
+                                    <div ref={fileMenuRef} className="relative h-8">
+                                        <button
+                                            type="button"
+                                            onClick={() => setFileMenuOpen((prev) => !prev)}
+                                            className={`h-8 px-2 sm:px-3 flex items-center gap-1 sm:gap-2 rounded-sm text-sm font-medium bg-slate-100 dark:bg-zinc-800 ${fileMenuOpen ? 'bg-white dark:bg-zinc-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-200'}`}
+                                            title="파일"
+                                        >
+                                            <IconSave className="w-4 h-4 shrink-0" />
+                                            <span className="hidden sm:inline">파일</span>
+                                            <span className="hidden sm:inline text-xs">▾</span>
+                                        </button>
+                                        {fileMenuOpen && (
+                                            <div className="absolute right-0 mt-2 w-52 rounded-lg bg-white dark:bg-darkpanel border border-slate-200 dark:border-zinc-700 shadow-xl overflow-hidden z-20">
+                                                <div className="px-3 pt-2.5 pb-1 text-[10px] font-black text-slate-400 dark:text-zinc-500 uppercase tracking-wider">로컬 데이터</div>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleLocalSaveClick}
+                                                    className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                                                >
+                                                    <IconSave className="w-3.5 h-3.5 text-slate-400" />
+                                                    로컬에 저장하기
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleLocalLoadClick}
+                                                    className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                                                >
+                                                    <IconUpload className="w-3.5 h-3.5 text-slate-400" />
+                                                    로컬에서 불러오기
+                                                </button>
+                                                <div className="mx-3 my-1.5 border-t border-slate-100 dark:border-zinc-700"></div>
+                                                <div className="px-3 pt-1 pb-1 text-[10px] font-black text-slate-400 dark:text-zinc-500 uppercase tracking-wider">구글 드라이브</div>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleCloudSaveMenuClick}
+                                                    disabled={!user || cloudLoading}
+                                                    className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm font-medium ${!user ? 'text-slate-300 dark:text-zinc-500 cursor-not-allowed' : 'text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
+                                                >
+                                                    <IconGoogle className="w-3.5 h-3.5" />
+                                                    드라이브에 저장하기
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleCloudLoadMenuClick}
+                                                    disabled={!user || cloudLoading}
+                                                    className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm font-medium ${!user ? 'text-slate-300 dark:text-zinc-500 cursor-not-allowed' : 'text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800'}`}
+                                                >
+                                                    <IconGoogle className="w-3.5 h-3.5" />
+                                                    드라이브에서 불러오기
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {viewMode === 'cover' ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                    {books.map((book, index) => (
+                                        <motion.div
+                                            key={book.id}
+                                            initial={{ opacity: 0, y: 20 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ delay: index * 0.05 }}
+                                            onDragOver={(e) => handleDragOver(e, book.id)}
+                                            onDrop={(e) => handleDrop(e, book.id)}
+                                            className="relative"
+                                        >
+                                            <BookCover
+                                                book={book}
+                                                onClick={() => !dragState.draggingId && onSelectBook(book.id)}
+                                                onDelete={onDeleteBook}
+                                                onEdit={(target) => setModalConfig({ isOpen: true, mode: 'edit', targetBook: target })}
+                                                isDragging={dragState.draggingId === book.id}
+                                                isDropTarget={dragState.overId === book.id && dragState.draggingId !== book.id}
+                                                dragHandleProps={{
+                                                    draggable: true,
+                                                    onDragStart: (e) => handleDragStart(e, book.id),
+                                                    onDragEnd: handleDragEnd
+                                                }}
+                                            />
+                                        </motion.div>
+                                    ))}
+
+                                    {/* 새 작품 추가 버튼 */}
+                                    <motion.button
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: books.length * 0.05 }}
+                                        onClick={() => setModalConfig({ isOpen: true, mode: 'create', targetBook: null })}
+                                        className="group flex flex-col items-center justify-center gap-4 aspect-[2/3] rounded-lg border-2 border-dashed border-slate-300 dark:border-zinc-700 hover:border-indigo-400 dark:hover:border-indigo-500 hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-all duration-300"
+                                    >
+                                        <div className="w-14 h-14 rounded-[3px] bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-400 dark:text-zinc-500 group-hover:bg-indigo-500 group-hover:text-white transition-all duration-300">
+                                            <IconPlus className="w-6 h-6" />
+                                        </div>
+                                        <div className="text-center">
+                                            <span className="block text-sm font-bold text-slate-500 dark:text-zinc-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">새 작품 시작하기</span>
+                                            <span className="block text-[10px] font-medium text-slate-400 dark:text-zinc-500 mt-1">클릭하여 추가</span>
+                                        </div>
+                                    </motion.button>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-2">
+                                    {books.map((book, index) => (
+                                        <motion.div
+                                            key={book.id}
+                                            initial={{ opacity: 0, y: 10 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ delay: index * 0.03 }}
+                                            onDragOver={(e) => handleDragOver(e, book.id)}
+                                            onDrop={(e) => handleDrop(e, book.id)}
+                                        >
+                                            <BookListItem
+                                                book={book}
+                                                onClick={() => !dragState.draggingId && onSelectBook(book.id)}
+                                                onEdit={(target) => setModalConfig({ isOpen: true, mode: 'edit', targetBook: target })}
+                                                isDragging={dragState.draggingId === book.id}
+                                                isDropTarget={dragState.overId === book.id && dragState.draggingId !== book.id}
+                                                dragHandleProps={{
+                                                    draggable: true,
+                                                    onDragStart: (e) => handleDragStart(e, book.id),
+                                                    onDragEnd: handleDragEnd
+                                                }}
+                                            />
+                                        </motion.div>
+                                    ))}
+
+                                    {/* 새 작품 추가 버튼 (목록형) */}
+                                    <motion.button
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: books.length * 0.03 }}
+                                        onClick={() => setModalConfig({ isOpen: true, mode: 'create', targetBook: null })}
+                                        className="group flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 border-dashed border-slate-300 dark:border-zinc-700 hover:border-indigo-400 dark:hover:border-indigo-500 hover:bg-slate-50 dark:hover:bg-zinc-800/50 transition-all duration-300"
+                                    >
+                                        <IconPlus className="w-4 h-4 text-slate-400 dark:text-zinc-500 group-hover:text-indigo-500 transition-colors" />
+                                        <span className="text-sm font-bold text-slate-500 dark:text-zinc-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">새 작품 시작하기</span>
+                                    </motion.button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [view, setView] = useState('library');
+            const [user, setUser] = useState(() => {
+                try {
+                    const savedUser = localStorage.getItem('sagak_google_user');
+                    if (savedUser) return JSON.parse(savedUser);
+                    const isGuest = localStorage.getItem('sagak_guest');
+                    if (isGuest === 'true') return { name: '게스트', email: '', isGuest: true };
+                    return null;
+                } catch (e) {
+                    return null;
+                }
+            });
+
+            const handleGuestEnter = useCallback(() => {
+                const guestUser = { name: '게스트', email: '', isGuest: true };
+                setUser(guestUser);
+                localStorage.setItem('sagak_guest', 'true');
+            }, []);
+            const [books, setBooks] = useState([]);
+            const [nickname, setNickname] = useState(() => localStorage.getItem('sagak_nickname') || '');
+            const [cloudImportData, setCloudImportData] = useState(null);
+            const [isDirty, setIsDirty] = useState(false);
+            const [isLoaded, setIsLoaded] = useState(false);
+            const [currentBookId, setCurrentBookId] = useState(null);
+            const [toast, setToast] = useState(null);
+            const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
+            const [fontMode, setFontMode] = useState(() => localStorage.getItem('sagak_font') || 'maruburi');
+            const [focusPosition, setFocusPosition] = useState(() => parseFloat(localStorage.getItem('sagak_focus_pos')) || 0.5);
+            const [defaultTargetCount, setDefaultTargetCount] = useState(() => parseInt(localStorage.getItem('sagak_default_goal')) || 5000);
+            const [editorWidth, setEditorWidth] = useState(() => localStorage.getItem('sagak_editor_width') || 'default');
+            const [editorFontSize, setEditorFontSize] = useState(() => parseInt(localStorage.getItem('sagak_editor_fontsize')) || 18);
+            const [showDocWordCount, setShowDocWordCount] = useState(() => localStorage.getItem('sagak_show_doc_wordcount') !== 'false');
+            const [enableHistory, setEnableHistory] = useState(() => localStorage.getItem('sagak_enable_history') !== 'false');
+            const [cloudAutoSaveInterval, setCloudAutoSaveInterval] = useState(() => parseInt(localStorage.getItem('sagak_cloud_autosave_interval')) || 10);
+
+            const isInitialRender = useRef(true);
+            const saveTimerRef = useRef(null);
+            const autoSaveTimerRef = useRef(null);
+
+            // 로컬 데이터 로딩
+            useEffect(() => {
+                const saved = localStorage.getItem('sagak_library');
+                if (saved) {
+                    try {
+                        const parsed = JSON.parse(saved);
+                        if (Array.isArray(parsed)) {
+                            setBooks(parsed);
+                        }
+                    } catch(e) { console.error("로컬 데이터 로드 실패:", e); }
+                }
+                setIsLoaded(true);
+            }, []);
+
+            // 레거시 Drive 토큰 보안 정리 (localStorage에 보관하지 않음)
+            useEffect(() => {
+                localStorage.removeItem('sagak_drive_token');
+                localStorage.removeItem('sagak_drive_token_expiry');
+            }, []);
+
+            // 로컬 자동 저장 (디바운스 처리)
+            useEffect(() => {
+                if (!isLoaded) return;
+                if (isInitialRender.current) {
+                    isInitialRender.current = false;
+                    return;
+                }
+                
+                if (saveTimerRef.current) {
+                    clearTimeout(saveTimerRef.current);
+                }
+                
+                saveTimerRef.current = setTimeout(() => {
+                    localStorage.setItem('sagak_library', JSON.stringify(books));
+                    setIsDirty(false);
+                }, 1000);
+                
+                setIsDirty(true);
+                
+                return () => {
+                    if (saveTimerRef.current) {
+                        clearTimeout(saveTimerRef.current);
+                    }
+                };
+            }, [books, isLoaded]);
+
+            // 브라우저 종료 시 경고
+            useEffect(() => {
+                const handleBeforeUnload = (e) => {
+                    if (isDirty) {
+                        e.preventDefault();
+                        e.returnValue = '';
+                    }
+                };
+                window.addEventListener('beforeunload', handleBeforeUnload);
+                return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+            }, [isDirty]);
+
+            // 상태 저장 로직 추가
+            useEffect(() => {
+                if (currentBookId) {
+                    localStorage.setItem('sagak_last_book_id', currentBookId);
+                } else {
+                    localStorage.removeItem('sagak_last_book_id');
+                }
+            }, [currentBookId]);
+
+            useEffect(() => {
+                if (isDarkMode) { document.documentElement.classList.add('dark'); localStorage.setItem('theme', 'dark'); }
+                else { document.documentElement.classList.remove('dark'); localStorage.setItem('theme', 'light'); }
+            }, [isDarkMode]);
+
+            // 설정값들 저장
+            useEffect(() => {
+                localStorage.setItem('sagak_focus_pos', focusPosition);
+                localStorage.setItem('sagak_default_goal', defaultTargetCount);
+                localStorage.setItem('sagak_editor_width', editorWidth);
+                localStorage.setItem('sagak_editor_fontsize', editorFontSize);
+                localStorage.setItem('sagak_show_doc_wordcount', showDocWordCount);
+                localStorage.setItem('sagak_enable_history', enableHistory);
+                localStorage.setItem('sagak_cloud_autosave_interval', cloudAutoSaveInterval);
+                localStorage.setItem('sagak_nickname', nickname);
+            }, [focusPosition, defaultTargetCount, editorWidth, editorFontSize, showDocWordCount, enableHistory, cloudAutoSaveInterval, nickname]);
+
+            // 브라우저 백그라운드 전환 시 즉시 저장 (모바일 대응)
+            useEffect(() => {
+                const handleVisibilityChange = () => {
+                    if (document.visibilityState === 'hidden') {
+                        localStorage.setItem('sagak_library', JSON.stringify(books));
+                        if (currentBookId) {
+                            localStorage.setItem('sagak_last_book_id', currentBookId);
+                        }
+                    }
+                };
+                document.addEventListener('visibilitychange', handleVisibilityChange);
+                return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+            }, [books, currentBookId]);
+
+            const toggleDarkMode = () => setIsDarkMode(prev => !prev);
+
+            // 폰트 변경 효과
+            useEffect(() => {
+                const fonts = ['font-maruburi', 'font-Ridibatang', 'font-Galmuri14', 'font-dunggeunmo', 'font-joseon100', 'font-pretendard'];
+                document.body.classList.remove(...fonts);
+                document.body.classList.add(`font-${fontMode}`);
+                localStorage.setItem('sagak_font', fontMode);
+            }, [fontMode]);
+
+            const toggleFont = () => {
+                const modes = ['maruburi', 'Ridibatang', 'Galmuri14', 'dunggeunmo', 'joseon100', 'pretendard'];
+                const nextIndex = (modes.indexOf(fontMode) + 1) % modes.length;
+                const nextFont = modes[nextIndex];
+                setFontMode(nextFont);
+                showToast(`폰트 변경: ${FONT_DISPLAY_NAMES[nextFont]}`);
+            };
+
+            const showToast = useCallback((message, type = 'success') => {
+                setToast({ message, type });
+                setTimeout(() => setToast(null), 2000);
+            }, []);
+
+            const DRIVE_BACKUP_FILENAME = 'sagak_studio_library.json';
+
+            const handleLogin = useCallback(async () => {
+                try {
+                    const token = await window.GoogleDriveAPI.requestAccessToken(true);
+                    let userInfo = { name: 'Google 계정', email: '', picture: '' };
+                    try {
+                        const profile = await window.GoogleDriveAPI.fetchProfile(token);
+                        userInfo = { name: profile.name || 'Google 계정', email: profile.email || '', picture: profile.picture || '' };
+                    } catch (profileErr) {
+                        console.warn('프로필 정보를 가져오지 못했습니다. 드라이브 기능은 계속 사용할 수 있습니다.', profileErr);
+                    }
+                    localStorage.removeItem('sagak_guest');
+                    setUser(userInfo);
+                    localStorage.setItem('sagak_google_user', JSON.stringify(userInfo));
+                    showToast('Google 계정에 연결되었습니다.');
+
+                    // 로그인 성공 후 자동으로 클라우드 데이터 불러오기
+                    try {
+                        const existing = await window.GoogleDriveAPI.findFile(token, DRIVE_BACKUP_FILENAME);
+                        if (existing && existing.length) {
+                            const data = await window.GoogleDriveAPI.downloadFile(token, existing[0].id);
+                            if (data) {
+                                const bookData = data && data.meta ? data.books : data;
+                                if (Array.isArray(bookData) && bookData.length > 0) {
+                                    setBooks(prevBooks => {
+                                        if (prevBooks.length > 0) {
+                                            setCloudImportData({ data, bookData });
+                                            showToast('클라우드 데이터를 불러옵니다. 불러오기 방식을 선택해주세요.');
+                                            return prevBooks;
+                                        } else {
+                                            if (data && data.meta) {
+                                                if (data.meta.nickname) setNickname(data.meta.nickname);
+                                                if (data.meta.isDarkMode !== undefined) setIsDarkMode(data.meta.isDarkMode);
+                                                if (data.meta.fontMode) setFontMode(data.meta.fontMode);
+                                                if (data.meta.focusPosition !== undefined) setFocusPosition(data.meta.focusPosition);
+                                                if (data.meta.defaultTargetCount) setDefaultTargetCount(data.meta.defaultTargetCount);
+                                                if (data.meta.editorWidth) setEditorWidth(data.meta.editorWidth);
+                                                if (data.meta.editorFontSize) setEditorFontSize(data.meta.editorFontSize);
+                                                if (data.meta.showDocWordCount !== undefined) setShowDocWordCount(data.meta.showDocWordCount);
+                                                if (data.meta.enableHistory !== undefined) setEnableHistory(data.meta.enableHistory);
+                                                if (data.meta.cloudAutoSaveInterval) setCloudAutoSaveInterval(data.meta.cloudAutoSaveInterval);
+                                            }
+                                            showToast('클라우드 데이터를 불러왔습니다.');
+                                            return bookData;
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    } catch (cloudErr) {
+                        console.warn('클라우드 데이터 불러오기 실패:', cloudErr);
+                    }
+                } catch (e) {
+                    console.error(e);
+                    showToast(e.message || 'Google 로그인에 실패했습니다.', 'error');
+                }
+            }, [showToast]);
+
+            const handleLogout = useCallback(() => {
+                window.GoogleDriveAPI.revoke();
+                setUser(null);
+                localStorage.removeItem('sagak_google_user');
+                localStorage.removeItem('sagak_guest');
+                try {
+                    sessionStorage.removeItem('sagak_drive_token');
+                    sessionStorage.removeItem('sagak_drive_token_expiry');
+                } catch (e) {}
+                showToast('로그아웃되었습니다.');
+            }, [showToast]);
+
+            const handleCloudUpload = useCallback(async () => {
+                if (!user) { showToast('먼저 Google 계정에 연결해주세요.', 'error'); return; }
+                try {
+                    const token = await window.GoogleDriveAPI.ensureAccessToken();
+                    const existing = await window.GoogleDriveAPI.findFile(token, DRIVE_BACKUP_FILENAME);
+                    const payload = {
+                        books,
+                        meta: {
+                            nickname,
+                            isDarkMode,
+                            fontMode,
+                            focusPosition,
+                            defaultTargetCount,
+                            editorWidth,
+                            editorFontSize,
+                            showDocWordCount,
+                            enableHistory,
+                            cloudAutoSaveInterval
+                        }
+                    };
+                    await window.GoogleDriveAPI.uploadJson(token, DRIVE_BACKUP_FILENAME, payload, existing[0] && existing[0].id);
+                    showToast('Google 드라이브에 백업되었습니다.');
+                } catch (e) {
+                    console.error(e);
+                    showToast(e.message || '드라이브 백업에 실패했습니다.', 'error');
+                }
+            }, [user, books, showToast, nickname, isDarkMode, fontMode, focusPosition, defaultTargetCount, editorWidth, editorFontSize, showDocWordCount, enableHistory, cloudAutoSaveInterval]);
+
+            const handleCloudDownload = useCallback(async () => {
+                if (!user) { showToast('먼저 Google 계정에 연결해주세요.', 'error'); return null; }
+                try {
+                    const token = await window.GoogleDriveAPI.ensureAccessToken();
+                    const existing = await window.GoogleDriveAPI.findFile(token, DRIVE_BACKUP_FILENAME);
+                    if (!existing.length) { showToast('드라이브에 저장된 백업이 없습니다.', 'error'); return null; }
+                    const data = await window.GoogleDriveAPI.downloadFile(token, existing[0].id);
+                    // meta가 포함된 새로운 형식 지원
+                    const bookData = data && data.meta ? data.books : data;
+                    if (!Array.isArray(bookData)) { showToast('백업 파일 형식이 올바르지 않습니다.', 'error'); return null; }
+                    if (data && data.meta) {
+                        if (data.meta.isDarkMode !== undefined) setIsDarkMode(data.meta.isDarkMode);
+                        if (data.meta.fontMode) setFontMode(data.meta.fontMode);
+                        if (data.meta.nickname) setNickname(data.meta.nickname);
+                        if (data.meta.focusPosition !== undefined) setFocusPosition(data.meta.focusPosition);
+                        if (data.meta.defaultTargetCount) setDefaultTargetCount(data.meta.defaultTargetCount);
+                        if (data.meta.editorWidth) setEditorWidth(data.meta.editorWidth);
+                        if (data.meta.editorFontSize) setEditorFontSize(data.meta.editorFontSize);
+                        if (data.meta.showDocWordCount !== undefined) setShowDocWordCount(data.meta.showDocWordCount);
+                        if (data.meta.enableHistory !== undefined) setEnableHistory(data.meta.enableHistory);
+                        if (data.meta.cloudAutoSaveInterval) setCloudAutoSaveInterval(data.meta.cloudAutoSaveInterval);
+                    }
+                    return bookData;
+                } catch (e) {
+                    console.error(e);
+                    showToast(e.message || '드라이브에서 불러오지 못했습니다.', 'error');
+                    return null;
+                }
+            }, [user, showToast, setIsDarkMode, setFontMode]);
+
+            const handleUpdateBook = useCallback((updatedBook) => {
+                setBooks(prev => prev.map(b => b.id === updatedBook.id ? updatedBook : b));
+            }, []);
+
+            const handleReorderBooks = useCallback((newBooks) => {
+                setBooks(newBooks);
+            }, []);
+
+            const currentBook = useMemo(() => books.find(b => b.id === currentBookId), [books, currentBookId]);
+
+            return (
+                <div className={`w-full font-pretendard antialiased text-slate-800 flex flex-col ${isDarkMode ? 'dark' : ''} ${fontMode}`} style={{ height: '100%' }}>
+                    <AnimatePresence> {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />} </AnimatePresence>
+                    {!user ? (
+                        <Landing onLogin={handleLogin} onGuestEnter={handleGuestEnter} />
+                    ) : view === 'library' ? (
+                        <Library
+                            books={books}
+                            user={user}
+                            onCloudUpload={handleCloudUpload}
+                            onCloudDownload={handleCloudDownload}
+                            onLogin={handleLogin}
+                            onLogout={handleLogout}
+                            onSelectBook={(id) => { 
+                                setCurrentBookId(id); 
+                                setView('workspace'); 
+                            }}
+                            onCreateBook={(newBook) => setBooks([...books, newBook])}
+                            onDeleteBook={(id) => {
+                                setBooks(prev => prev.filter(b => b.id !== id));
+                                showToast("작품이 삭제되었습니다.");
+                            }}
+                            onUpdateBook={handleUpdateBook}
+                            onReorderBooks={handleReorderBooks}
+                            onImport={(imported, shouldReplace) => {
+                                if (shouldReplace) {
+                                    setBooks(imported);
+                                    showToast("서재를 초기화하고 데이터를 불러왔습니다.");
+                                } else {
+                                    setBooks(prev => [...prev, ...imported.map(remapBookIdsForImport)]);
+                                    showToast("라이브러리를 추가로 불러왔습니다.");
+                                }
+                            }}
+                            isDarkMode={isDarkMode}
+                            toggleDarkMode={toggleDarkMode}
+                            setIsDarkMode={setIsDarkMode}
+                            fontMode={fontMode}
+                            toggleFont={toggleFont}
+                            setFontMode={setFontMode}
+                            focusPosition={focusPosition}
+                            setFocusPosition={setFocusPosition}
+                            defaultTargetCount={defaultTargetCount}
+                            setDefaultTargetCount={setDefaultTargetCount}
+                            editorWidth={editorWidth}
+                            setEditorWidth={setEditorWidth}
+                            editorFontSize={editorFontSize}
+                            setEditorFontSize={setEditorFontSize}
+                            showDocWordCount={showDocWordCount}
+                            setShowDocWordCount={setShowDocWordCount}
+                            enableHistory={enableHistory}
+                            setEnableHistory={setEnableHistory}
+                            cloudAutoSaveInterval={cloudAutoSaveInterval}
+                            setCloudAutoSaveInterval={setCloudAutoSaveInterval}
+                            nickname={nickname}
+                            setNickname={setNickname}
+                            cloudImportData={cloudImportData}
+                            onClearCloudImport={() => setCloudImportData(null)}
+                        />
+                    ) : view === 'workspace' && currentBook ? (
+                        <Workspace
+                            currentBook={currentBook}
+                            user={user}
+                            onLogin={handleLogin}
+                            onLogout={handleLogout}
+                            onUpdateBook={handleUpdateBook}
+                            onExit={() => setView('library')}
+                            showToast={showToast}
+                            isDarkMode={isDarkMode}
+                            toggleDarkMode={toggleDarkMode}
+                            fontMode={fontMode}
+                            toggleFont={toggleFont}
+                            setFontMode={setFontMode}
+                            focusPosition={focusPosition}
+                            setFocusPosition={setFocusPosition}
+                            defaultTargetCount={defaultTargetCount}
+                            setDefaultTargetCount={setDefaultTargetCount}
+                            editorWidth={editorWidth}
+                            setEditorWidth={setEditorWidth}
+                            editorFontSize={editorFontSize}
+                            setEditorFontSize={setEditorFontSize}
+                            showDocWordCount={showDocWordCount}
+                            setShowDocWordCount={setShowDocWordCount}
+                            enableHistory={enableHistory}
+                            setEnableHistory={setEnableHistory}
+                            cloudAutoSaveInterval={cloudAutoSaveInterval}
+                            setCloudAutoSaveInterval={setCloudAutoSaveInterval}
+                            nickname={nickname}
+                            setNickname={setNickname}
+                        />
+                    ) : (
+                        // Fallback if view is workspace but no book is selected
+                        <Library
+                            books={books}
+                            user={user}
+                            onCloudUpload={handleCloudUpload}
+                            onCloudDownload={handleCloudDownload}
+                            onLogin={handleLogin}
+                            onLogout={handleLogout}
+                            onSelectBook={(id) => { 
+                                setCurrentBookId(id); 
+                                setView('workspace'); 
+                            }}
+                            onCreateBook={(newBook) => setBooks([...books, newBook])}
+                            onDeleteBook={(id) => {
+                                setBooks(prev => prev.filter(b => b.id !== id));
+                                showToast("작품이 삭제되었습니다.");
+                            }}
+                            onUpdateBook={handleUpdateBook}
+                            onReorderBooks={handleReorderBooks}
+                            onImport={(imported, shouldReplace) => {
+                                if (shouldReplace) {
+                                    setBooks(imported);
+                                    showToast("서재를 초기화하고 데이터를 불러왔습니다.");
+                                } else {
+                                    setBooks(prev => [...prev, ...imported.map(remapBookIdsForImport)]);
+                                    showToast("라이브러리를 추가로 불러왔습니다.");
+                                }
+                            }}
+                            isDarkMode={isDarkMode}
+                            toggleDarkMode={toggleDarkMode}
+                            setIsDarkMode={setIsDarkMode}
+                            fontMode={fontMode}
+                            toggleFont={toggleFont}
+                            setFontMode={setFontMode}
+                            focusPosition={focusPosition}
+                            setFocusPosition={setFocusPosition}
+                            defaultTargetCount={defaultTargetCount}
+                            setDefaultTargetCount={setDefaultTargetCount}
+                            editorWidth={editorWidth}
+                            setEditorWidth={setEditorWidth}
+                            editorFontSize={editorFontSize}
+                            setEditorFontSize={setEditorFontSize}
+                            showDocWordCount={showDocWordCount}
+                            setShowDocWordCount={setShowDocWordCount}
+                            enableHistory={enableHistory}
+                            setEnableHistory={setEnableHistory}
+                            cloudAutoSaveInterval={cloudAutoSaveInterval}
+                            setCloudAutoSaveInterval={setCloudAutoSaveInterval}
+                            nickname={nickname}
+                            setNickname={setNickname}
+                            cloudImportData={cloudImportData}
+                            onClearCloudImport={() => setCloudImportData(null)}
+                        />
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
