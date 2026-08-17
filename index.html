@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>썸머 에디터</title>
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;
+        script-src * 'unsafe-inline' 'unsafe-eval' data: blob:;
+        style-src * 'unsafe-inline' data: blob:;
+        img-src * data: blob:;
+        font-src * data: blob:;
+        connect-src *;
+        frame-src *;
+        worker-src * 'unsafe-inline' blob:;
+    ">
+
+    <link rel="preconnect" href="https://unpkg.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preconnect" href="https://cdn.tailwindcss.com" crossorigin>
+    <link rel="preconnect" href="https://accounts.google.com" crossorigin>
+
+    <script src="src/config.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"
+        integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"
+        integrity="sha384-PlRSzpewlarQuj5alIadXwjNUX+2eNMKwr0f07ShWYLy8B6TjEbm7ZlcN/ScSbwy"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://unpkg.com/docx@7.1.0/build/index.js"
+        integrity="sha384-lGLqE+x3VglMuTcmrdpm32ZSDEh1a93PZ+jHuVZ8jG4DayHt4qNBJtmwL76C855e"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"
+        integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"
+        integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"
+        integrity="sha384-3jn0L4WD/7+km/BSeyWZDSF25MwedyrmDKU2Teb+iPLGUrbDKIe4ojwmzayKc12G"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.1.1/crypto-js.js"
+        integrity="sha384-gR8pzIJ1b+DNklWrrcXEaidJIQ637f1IchZyr3SWkIElES9bomvMM8Io1NX9g2tO"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"
+        integrity="sha384-2IH3T69EIKYC4c+RXZifZRvaH5SRUdacJW7j6HtE5rQbvLhKKdawxq6vpIzJ7j9M"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <meta name="theme-color" content="#09090b">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <script>
+        // 다크모드 깜빡임 방지: React 초기화 전에 localStorage를 읽어 즉시 class 적용
+        if (localStorage.getItem('theme') === 'dark') {
+            document.documentElement.classList.add('dark');
+        }
+    </script>
+
+    <script>
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            window.__sagakInstallPrompt = e;
+            window.dispatchEvent(new CustomEvent('sagak-install-prompt-ready', { detail: e }));
+        });
+
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('[SW] 등록 완료:', reg.scope))
+                    .catch(err => console.warn('[SW] 등록 실패:', err));
+            });
+        }
+    </script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkbg: '#09090b',
+                        darkpanel: '#18181b',
+                        darkborder: '#27272a',
+                    },
+                    borderRadius: {
+                        'sm': '3px',
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="src/styles.css?v=1.2.1">
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script src="src/data.js?v=1.2.1"></script>
+
+    <script src="src/google-drive.js?v=1.2.1"></script>
+    <script src="src/sagak-crypto.js?v=1.2.1"></script>
+    <script src="src/app.compiled.js?v=1.2.1"></script>
+</body>
+</html>
