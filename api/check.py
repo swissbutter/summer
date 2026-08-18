@@ -114,6 +114,18 @@ def split_text_clean(text, max_len=300):
     return chunks
 
 class handler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
+    def _send_cors_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+
     def do_POST(self):
         try:
             content_length = int(self.headers.get('Content-Length', 0))
@@ -124,6 +136,7 @@ class handler(BaseHTTPRequestHandler):
             if not text or not text.strip():
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json; charset=utf-8')
+                self._send_cors_headers()
                 self.end_headers()
                 self.wfile.write(json.dumps({
                     "result": True,
@@ -216,6 +229,7 @@ class handler(BaseHTTPRequestHandler):
 
             self.send_response(200)
             self.send_header('Content-type', 'application/json; charset=utf-8')
+            self._send_cors_headers()
             self.end_headers()
             self.wfile.write(json.dumps({
                 "result": True,
@@ -227,5 +241,6 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_response(500)
             self.send_header('Content-type', 'application/json; charset=utf-8')
+            self._send_cors_headers()
             self.end_headers()
             self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
