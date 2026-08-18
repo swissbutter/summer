@@ -6700,6 +6700,42 @@
             );
         };
 
+
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null };
+            }
+            static getDerivedStateFromError(error) {
+                return { hasError: true, error };
+            }
+            componentDidCatch(error, errorInfo) {
+                console.error('[ErrorBoundary]', error, errorInfo);
+            }
+            render() {
+                if (this.state.hasError) {
+                    return React.createElement('div', {
+                        style: {
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                            height: '100vh', fontFamily: 'sans-serif', background: '#09090b', color: '#e4e4e7', padding: '2rem', textAlign: 'center'
+                        }
+                    },
+                        React.createElement('h2', { style: { fontSize: '1.25rem', marginBottom: '1rem' } }, '문제가 발생했습니다'),
+                        React.createElement('p', { style: { fontSize: '0.875rem', color: '#a1a1aa', marginBottom: '1.5rem', maxWidth: '400px' } },
+                            '앱에 오류가 발생했습니다. 아래 버튼을 눌러 다시 시작해주세요.'),
+                        React.createElement('button', {
+                            onClick: () => { this.setState({ hasError: false, error: null }); window.location.reload(); },
+                            style: {
+                                padding: '0.75rem 2rem', borderRadius: '0.5rem', border: 'none',
+                                background: '#6366f1', color: 'white', fontSize: '0.875rem', fontWeight: 700, cursor: 'pointer'
+                            }
+                        }, '다시 시작')
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
         const App = () => {
             const [view, setView] = useState('library');
             const [user, setUser] = useState(() => {
@@ -6758,6 +6794,48 @@
             useEffect(() => {
                 localStorage.removeItem('sagak_drive_token');
                 localStorage.removeItem('sagak_drive_token_expiry');
+            }, []);
+
+            // 페이지 복귀 시 로그인 자동 재시도 (모바일 OAuth 팝업으로 페이지가 죽었을 때)
+            useEffect(() => {
+                const wasPending = sessionStorage.getItem('sagak_login_pending');
+                if (wasPending && !user) {
+                    sessionStorage.removeItem('sagak_login_pending');
+                    const tryAutoLogin = async () => {
+                        const waitForGoogleAPI = () => new Promise((resolve) => {
+                            if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+                                resolve();
+                                return;
+                            }
+                            let attempts = 0;
+                            const interval = setInterval(() => {
+                                attempts++;
+                                if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+                                    clearInterval(interval);
+                                    resolve();
+                                } else if (attempts > 50) {
+                                    clearInterval(interval);
+                                    resolve();
+                                }
+                            }, 200);
+                        });
+                        await waitForGoogleAPI();
+                        try {
+                            const token = await window.GoogleDriveAPI.requestAccessToken(false);
+                            let userInfo = { name: 'Google 계정', email: '', picture: '' };
+                            try {
+                                const profile = await window.GoogleDriveAPI.fetchProfile(token);
+                                userInfo = { name: profile.name || 'Google 계정', email: profile.email || '', picture: profile.picture || '' };
+                            } catch (e) {}
+                            localStorage.removeItem('sagak_guest');
+                            setUser(userInfo);
+                            localStorage.setItem('sagak_google_user', JSON.stringify(userInfo));
+                        } catch (e) {
+                            console.warn('자동 재인증 실패:', e);
+                        }
+                    };
+                    tryAutoLogin();
+                }
             }, []);
 
             // 로컬 자동 저장 (디바운스 처리)
@@ -6865,17 +6943,19 @@
 
             const handleLogin = useCallback(async () => {
                 try {
+                    sessionStorage.setItem('sagak_login_pending', 'true');
                     const token = await window.GoogleDriveAPI.requestAccessToken(true);
                     let userInfo = { name: 'Google 계정', email: '', picture: '' };
                     try {
                         const profile = await window.GoogleDriveAPI.fetchProfile(token);
                         userInfo = { name: profile.name || 'Google 계정', email: profile.email || '', picture: profile.picture || '' };
                     } catch (profileErr) {
-                        console.warn('프로필 정보를 가져오지 못했습니다. 드라이브 기능은 계속 사용할 수 있습니다.', profileErr);
+                        console.warn('프로필 정보를 가져오지 못했습니다.', profileErr);
                     }
                     localStorage.removeItem('sagak_guest');
                     setUser(userInfo);
                     localStorage.setItem('sagak_google_user', JSON.stringify(userInfo));
+                    sessionStorage.removeItem('sagak_login_pending');
                     showToast('Google 계정에 연결되었습니다.');
 
                     // 로그인 성공 후 자동으로 클라우드 데이터 불러오기
@@ -6916,6 +6996,7 @@
                     }
                 } catch (e) {
                     console.error(e);
+                    sessionStorage.removeItem('sagak_login_pending');
                     showToast(e.message || 'Google 로그인에 실패했습니다.', 'error');
                 }
             }, [showToast]);
@@ -7149,4 +7230,4 @@
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(<ErrorBoundary><App /></ErrorBoundary>);
