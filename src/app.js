@@ -1812,7 +1812,6 @@
             const [showSystemSettings, setShowSystemSettings] = useState(false);
             const [showHistoryModal, setShowHistoryModal] = useState(false);
             const [showSynopsisModal, setShowSynopsisModal] = useState(false);
-            const [aiDraftLoading, setAiDraftLoading] = useState(false);
             const [openStatusDropdownId, setOpenStatusDropdownId] = useState(null);
             const [corkboardMode, setCorkboardMode] = useState(() => {
                 const saved = localStorage.getItem(`sagak_last_mode_${currentBook.id}`);
@@ -5008,41 +5007,7 @@
 
                     {/* 시놉시스 모달 */}
                     <AnimatePresence>
-                        {showSynopsisModal && activeProject && (() => {
-                            const handleAiDraft = async () => {
-                                const synopsisText = (activeProject.synopsis || '').trim();
-                                if (!synopsisText) { showToast('시놉시스를 먼저 작성해주세요.', 'error'); return; }
-                                setAiDraftLoading(true);
-                                try {
-                                    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=AQ.Ab8RN6IMoJyUc9mB5wYKHYfjAxAQVVrgot4UesgNphQ-OWgC5g', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({
-                                            contents: [{ parts: [{ text: `당신은 한국 웹소설 작가입니다. 아래 시놉시스를 참고하여 약 1000자 분량의 소설 초고를 한국어로 써주세요. 문학적이고 몰입감 있는 문체로 작성하세요. 시놉시스 내용만 참고하고, 별도의 설명이나 주석 없이 소설 본문만 출력하세요.\n\n[시놉시스]\n${synopsisText}` }] }],
-                                            generationConfig: { temperature: 0.9, maxOutputTokens: 2048 }
-                                        })
-                                    });
-                                    if (!res.ok) throw new Error('API 요청 실패');
-                                    const data = await res.json();
-                                    const draft = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                                    if (!draft) throw new Error('응답이 비어있습니다');
-                                    setProjects(prev => prev.map(p => {
-                                        if (p.id === activeProject.id) {
-                                            const existingContent = p.content || '';
-                                            const newContent = existingContent ? (existingContent + '\n\n' + draft) : draft;
-                                            return { ...p, content: newContent };
-                                        }
-                                        return p;
-                                    }));
-                                    showToast('AI 초고(약 1000자)가 본문에 작성되었습니다.');
-                                } catch (e) {
-                                    console.error('AI Draft error:', e);
-                                    showToast(e.message || 'AI 초고 생성에 실패했습니다.', 'error');
-                                } finally {
-                                    setAiDraftLoading(false);
-                                }
-                            };
-                            return (
+                        {showSynopsisModal && activeProject && (
                             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
                                 <motion.div 
                                     initial={{ opacity: 0 }} 
@@ -5062,17 +5027,6 @@
                                             📝 시놉시스
                                         </h2>
                                         <div className="flex items-center gap-2">
-                                            <button 
-                                                onClick={handleAiDraft}
-                                                disabled={aiDraftLoading}
-                                                className={`px-3 py-1.5 rounded text-xs font-bold transition-colors flex items-center gap-1.5 ${aiDraftLoading ? 'bg-slate-100 text-slate-400 dark:bg-zinc-700 dark:text-zinc-500 cursor-wait' : 'bg-violet-50 text-violet-600 hover:bg-violet-100 dark:bg-violet-900/30 dark:text-violet-400 dark:hover:bg-violet-900/50'}`}
-                                            >
-                                                {aiDraftLoading ? (
-                                                    <><svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="32" strokeLinecap="round" /></svg> 생성중...</>
-                                                ) : (
-                                                    <><svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" /></svg> AI 초고 쓰기</>
-                                                )}
-                                            </button>
                                             <button 
                                                 onClick={() => { setShowSynopsisModal(false); setCorkboardMode(true); }}
                                                 className="px-3 py-1.5 bg-amber-50 text-amber-600 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 rounded text-xs font-bold transition-colors"
@@ -5094,8 +5048,7 @@
                                     </div>
                                 </motion.div>
                             </div>
-                            );
-                        })()}
+                        )}
                     </AnimatePresence>
 
                     <AnimatePresence>
