@@ -1,5 +1,8 @@
 {
   "version": 2,
+  "buildCommand": "",
+  "installCommand": "",
+  "framework": null,
   "builds": [
     {
       "src": "api/check.py",
