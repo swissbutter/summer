@@ -5715,7 +5715,19 @@
         const SystemSettingsModal = ({ onClose, user, onLogin, onLogout, isDarkMode, toggleDarkMode, fontMode, toggleFont, setFontMode, activeProject, onUpdateProject, focusPosition, setFocusPosition, defaultTargetCount, setDefaultTargetCount, editorWidth, setEditorWidth, editorFontSize, setEditorFontSize, showDocWordCount, setShowDocWordCount, enableHistory, setEnableHistory, cloudAutoSaveInterval, setCloudAutoSaveInterval, nickname, setNickname }) => {
             const [editingNickname, setEditingNickname] = useState(false);
             const [draftNickname, setDraftNickname] = useState(nickname);
+            const [fontDropdownOpen, setFontDropdownOpen] = useState(false);
+            const fontDropdownRef = useRef(null);
 
+            useEffect(() => {
+                if (!fontDropdownOpen) return;
+                const handleClick = (e) => {
+                    if (fontDropdownRef.current && !fontDropdownRef.current.contains(e.target)) {
+                        setFontDropdownOpen(false);
+                    }
+                };
+                document.addEventListener('mousedown', handleClick);
+                return () => document.removeEventListener('mousedown', handleClick);
+            }, [fontDropdownOpen]);
             return (
                 <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
                     <motion.div
@@ -5829,17 +5841,31 @@
                                     <div className="w-px h-4 bg-slate-200 dark:bg-zinc-700"></div>
                                     <div className="flex items-center justify-between">
                                         <div className="text-sm font-black text-slate-700 dark:text-zinc-200">폰트</div>
-                                        <div className="relative w-24">
-                                            <select
-                                                value={fontMode}
-                                                onChange={(e) => setFontMode(e.target.value)}
-                                                className="w-full appearance-none flex items-center justify-center gap-1.5 pl-6 pr-2 py-1.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-sm font-black text-[10px] hover:bg-indigo-100 transition-all dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800 cursor-pointer focus:outline-none"
+                                        <div className="relative w-24" ref={fontDropdownRef}>
+                                            <button
+                                                onClick={() => setFontDropdownOpen(!fontDropdownOpen)}
+                                                className="w-full flex items-center gap-1.5 pl-6 pr-2 py-1.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-[2px] font-black text-[10px] hover:bg-indigo-100 transition-all dark:bg-indigo-900/30 dark:text-indigo-400 dark:border-indigo-800 cursor-pointer focus:outline-none"
                                             >
-                                                {Object.keys(FONT_DISPLAY_NAMES).map((key) => (
-                                                    <option key={key} value={key}>{FONT_DISPLAY_NAMES[key]}</option>
-                                                ))}
-                                            </select>
+                                                <span className="truncate">{FONT_DISPLAY_NAMES[fontMode]}</span>
+                                                <svg className={`w-2.5 h-2.5 ml-auto shrink-0 transition-transform ${fontDropdownOpen ? 'rotate-180' : ''}`} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 4.5l3 3 3-3" /></svg>
+                                            </button>
                                             <IconFont className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                            {fontDropdownOpen && (
+                                                <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-[3px] shadow-lg z-50 py-0.5 overflow-hidden">
+                                                    {Object.keys(FONT_DISPLAY_NAMES).map((key) => (
+                                                        <button
+                                                            key={key}
+                                                            onClick={() => { setFontMode(key); setFontDropdownOpen(false); }}
+                                                            className={`w-full flex items-center gap-2 px-2.5 py-[7px] text-[11px] text-left transition-colors ${fontMode === key ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400 font-bold' : 'text-slate-600 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800'}`}
+                                                        >
+                                                            <span className={`w-3.5 flex items-center justify-center shrink-0 ${fontMode === key ? 'opacity-100' : 'opacity-0'}`}>
+                                                                <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 6l3 3 5-5" /></svg>
+                                                            </span>
+                                                            <span className={`font-${key}`}>{FONT_DISPLAY_NAMES[key]}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
